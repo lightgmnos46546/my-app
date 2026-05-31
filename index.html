@@ -11,14 +11,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="201 SOMS" />
     <meta name="theme-color" content="#020817" />
-    <meta name="mobile-web-app-capable" content="yes" />
     <style>
       *, *::before, *::after { box-sizing: border-box; }
       html, body {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        min-height: 100vh;
+        margin: 0; padding: 0;
+        width: 100%; min-height: 100vh;
         background: #020817;
         overflow-x: hidden;
         -webkit-font-smoothing: antialiased;
@@ -26,9 +23,16 @@
       }
       #root { width: 100%; min-height: 100vh; }
       button { touch-action: manipulation; }
+      @supports (padding: env(safe-area-inset-top)) {
+        .app-header {
+          padding-top: max(10px, env(safe-area-inset-top)) !important;
+        }
+        .app-sidebar-header {
+          padding-top: max(18px, env(safe-area-inset-top)) !important;
+        }
+      }
     </style>
-    <script type="module" crossorigin src="/my-app/assets/index-C1vjul4l.js"></script>
-    <link rel="stylesheet" crossorigin href="/my-app/assets/index-BmiaggY4.css">
+    <script type="module" crossorigin src="/my-app/assets/index-DaGgCrn4.js"></script>
   </head>
   <body>
     <div id="root"></div>
