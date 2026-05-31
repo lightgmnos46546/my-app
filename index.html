@@ -14,10 +14,24 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <style>
       *, *::before, *::after { box-sizing: border-box; }
-      html, body { margin: 0; padding: 0; width: 100%; min-height: 100vh; background: #020817; overflow-x: hidden; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+      html, body {
+        margin: 0; padding: 0;
+        width: 100%; min-height: 100vh;
+        background: #020817;
+        overflow-x: hidden;
+        -webkit-font-smoothing: antialiased;
+        -webkit-tap-highlight-color: transparent;
+        /* รองรับ safe area iPhone */
+        padding-top: env(safe-area-inset-top);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+        padding-bottom: env(safe-area-inset-bottom);
+      }
       #root { width: 100%; min-height: 100vh; }
+      /* ปุ่มทุกอันให้กดง่าย */
+      button { touch-action: manipulation; }
     </style>
-    <script type="module" crossorigin src="/my-app/assets/index-B2m-jlZE.js"></script>
+    <script type="module" crossorigin src="/my-app/assets/index-BVwRFmrf.js"></script>
   </head>
   <body>
     <div id="root"></div>
