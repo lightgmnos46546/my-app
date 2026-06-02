@@ -93,6 +93,31 @@ async function loadNotamFromCSV(): Promise<any[][]> {
   }
 }
 
+function cleanRawText(val: string): string {
+  if (!val) return "";
+  let clean = val.trim();
+  
+  // 1. Remove trailing divider and signature
+  clean = clean.replace(/\n*-+\s*UPDATED ON[\s\S]*$/i, "");
+  
+  let prev;
+  do {
+    prev = clean;
+    // 2. Remove trailing airport headings like "13. สนามบินปัตตานี (VTSK)"
+    clean = clean.replace(/\n+\d+\.\s*สนามบิน[ก-๙a-zA-Z\s\-\(\)]+(?:\([A-Z]{4}\))?\s*(\n+\s*\()?$/g, "");
+    
+    // 3. Remove other trailing section headers
+    clean = clean.replace(/\n+(?:UNMANNED AIRCRAFT|AERIAL PHOTO|AREA|UPDATE AIP THAILAND|FLIGHT PLANNING\s*:\s*ROUTE)\s*(\n+\s*\()?$/gi, "");
+    
+    // 4. Remove dangling parentheses
+    clean = clean.replace(/\n+\s*\($/, "");
+    
+    clean = clean.trim();
+  } while (clean !== prev);
+  
+  return clean;
+}
+
 import DatePicker from "./components/DatePicker";
 import HeloImg from "./components/HeloImg";
 
@@ -650,6 +675,7 @@ function NotamTab() {
         // คัดกรองข้อมูลคอลัมน์ดัชนี 8 (Raw_Text) หรือดัชนี 5 (Description) ของแต่ละแถว และนำมารวมกันเป็นข้อความก้อนใหญ่
         const rawTexts = rows.slice(1).map(r => {
           let val = r[8] || r[5];
+          val = cleanRawText(val);
           if (val && !val.trim().startsWith("(")) {
             val = "(" + val.trim() + ")";
           }
@@ -3684,6 +3710,7 @@ function DashboardContent() {
       if(rows.length>1){
         const rawTexts = rows.slice(1).map(r => {
           let val = r[8] || r[5];
+          val = cleanRawText(val);
           if (val && !val.trim().startsWith("(")) {
             val = "(" + val.trim() + ")";
           }
