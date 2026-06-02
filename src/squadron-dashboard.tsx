@@ -642,6 +642,7 @@ function classifyT(q) {
 function NotamTab() {
   const [sel,setSel]       = useState(["VTBD"]);
   const [prio,setPrio]     = useState("ALL");
+  const [seriesFilter, setSeriesFilter] = useState("ALL"); // "ALL" | "BLACK" | "BLUE"
   const [region,setRegion] = useState("ทั้งหมด");
   const [branch,setBranch] = useState("ทั้งหมด");
   const [search,setSearch] = useState("");
@@ -777,11 +778,17 @@ function NotamTab() {
     return (activeNotams[icao]||[]).map(n=>({...n,icao,apName:ap?.name||icao,branch:ap?.branch}));
   }).filter(n=>{
     if(prio!=="ALL"&&n.p!==prio) return false;
+    if(seriesFilter==="BLACK"&&n.id.startsWith("J")) return false;
+    if(seriesFilter==="BLUE"&&!n.id.startsWith("J")) return false;
     if(search&&!n.raw.toUpperCase().includes(search.toUpperCase())&&!n.icao.includes(search.toUpperCase())) return false;
     return true;
   }).sort((a,b)=>({HIGH:0,MED:1,LOW:2}[a.p]-{HIGH:0,MED:1,LOW:2}[b.p]));
 
-  const totalHigh = Object.values(activeNotams).flat().filter(n=>n.p==="HIGH").length;
+  const totalHigh = Object.values(activeNotams).flat().filter(n=>{
+    if(seriesFilter==="BLACK"&&n.id.startsWith("J")) return false;
+    if(seriesFilter==="BLUE"&&!n.id.startsWith("J")) return false;
+    return n.p==="HIGH";
+  }).length;
   const isUploaded = Object.keys(uploadedNotams).length > 0;
 
   const handleConfirmImport = (validBlocks) => {
@@ -883,8 +890,13 @@ function NotamTab() {
         <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
           {filtAp.map(ap=>{
             const isS=sel.includes(ap.icao);
-            const cnt=(activeNotams[ap.icao]||[]).length;
-            const hi=(activeNotams[ap.icao]||[]).filter(n=>n.p==="HIGH").length;
+            const listFiltered = (activeNotams[ap.icao]||[]).filter(n=>{
+              if(seriesFilter==="BLACK"&&n.id.startsWith("J")) return false;
+              if(seriesFilter==="BLUE"&&!n.id.startsWith("J")) return false;
+              return true;
+            });
+            const cnt=listFiltered.length;
+            const hi=listFiltered.filter(n=>n.p==="HIGH").length;
             const bc=BC[ap.branch]||"var(--text-secondary)";
             return <button key={ap.icao} onClick={()=>setSel(p=>p.includes(ap.icao)?p.filter(x=>x!==ap.icao):[...p,ap.icao])}
               title={ap.name} style={{padding:"6px 10px",borderRadius:8,border:`1px solid ${isS?bc:"#1e293b"}`,background:isS?bc+"22":"#0f172a",cursor:"pointer",position:"relative",minWidth:78}}>
@@ -894,6 +906,25 @@ function NotamTab() {
             </button>;
           })}
         </div>
+      </div>
+
+      {/* ประเภท NOTAM (สีดำ/สีฟ้า) */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+        <span style={{fontSize:14,color:"var(--text-secondary)",alignSelf:"center"}}>ประเภท NOTAM:</span>
+        {[
+          {id:"ALL",label:"ทั้งหมด",color:"#38bdf8"},
+          {id:"BLACK",label:"NOTAM สนามบิน (สีดำ - Series A/C)",color:"#e2e8f0"},
+          {id:"BLUE",label:"NOTAM กิจกรรมน่านฟ้า (สีฟ้า - Series J)",color:"#60a5fa"}
+        ].map(t=>(
+          <button key={t.id} onClick={()=>setSeriesFilter(t.id)} 
+            style={{padding:"5px 12px",fontSize:14,borderRadius:6,
+              border:`1px solid ${seriesFilter===t.id?t.color:"#1e3a5f"}`,
+              background:seriesFilter===t.id?t.color+"22":"transparent",
+              color:seriesFilter===t.id?t.color:"var(--text-secondary)",
+              cursor:"pointer",fontWeight:700}}>
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {/* Priority + Search */}
@@ -942,6 +973,8 @@ function NotamTab() {
           const bc=BC[ap?.branch]||"var(--text-secondary)";
           const ntms=(activeNotams[icao]||[]).filter(n=>{
             if(prio!=="ALL"&&n.p!==prio) return false;
+            if(seriesFilter==="BLACK"&&n.id.startsWith("J")) return false;
+            if(seriesFilter==="BLUE"&&!n.id.startsWith("J")) return false;
             if(search&&!n.raw.toUpperCase().includes(search.toUpperCase())) return false;
             return true;
           });
