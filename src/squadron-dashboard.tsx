@@ -2322,10 +2322,10 @@ function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)
           onClick={()=>setExpandedRow(isExpanded?null:realIdx)}
           style={{height: 56, borderBottom:isExpanded?"none":"1px solid var(--border-panel)",background:rowBg,cursor:"pointer",transition:"background 0.15s",fontFamily:sf,fontWeight:500}}>
           <td style={{padding:0,width:0,border:"none"}}></td>
-          <td style={{padding:"8px 5px",textAlign:"center"}}><span style={{background:dc,color:"#fff",fontWeight:800,fontSize:11,padding:"2px 6px",borderRadius:5}}>{f.day}</span></td>
+          <td style={{padding:"8px 5px",textAlign:"center"}}><span style={{background:dc,color:"#fff",fontWeight:800,fontSize:13,padding:"2px 6px",borderRadius:5}}>{f.day}</span></td>
           <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)"}}>{f.date ? f.date.split(" ").slice(0, 2).join(" ") : ""}</td>
           <td style={{padding:"8px 5px",textAlign:"center",whiteSpace:"nowrap"}}>
-            <span style={{background:f.acTypeF==="S-92A"?"rgba(16,185,129,0.15)":"rgba(56,189,248,0.15)",color:f.acTypeF==="S-92A"?"#10b981":"#38bdf8",fontWeight:700,fontSize:11,padding:"1px 6px",borderRadius:5}}>{f.acTypeF||"—"}</span>
+            <span style={{background:f.acTypeF==="S-92A"?"rgba(16,185,129,0.15)":"rgba(56,189,248,0.15)",color:f.acTypeF==="S-92A"?"#10b981":"#38bdf8",fontWeight:700,fontSize:13,padding:"1px 6px",borderRadius:5}}>{f.acTypeF||"—"}</span>
           </td>
           <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)"}}>{formatMissionText(f.mission, "center")}</td>
           <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)"}}>{f.ac}</td>
@@ -2506,11 +2506,11 @@ function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)
         {view==="weekly"&&(
           <div className="table-container" style={{borderRadius:"0 0 16px 16px", borderTop:"none"}}>
             <div className="scrollbar-free-table-wrapper" style={{overflowX:"auto"}}>
-              <table className="scrollbar-free-table" style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <table className="scrollbar-free-table" style={{width:"100%",borderCollapse:"collapse",fontSize:14}}>
                 <thead>
                   <tr style={{background:"var(--bg-card)"}}>
                     <th style={{padding:0,width:0,border:"none"}}></th>
-                    {COLS.map(c=><th key={c.k} style={{padding:"8px 5px",color:"var(--text-primary)",fontWeight:800,fontSize:12,textAlign:"center",width:c.w,borderRight:"1px solid var(--border-panel)",overflow:"hidden"}}>{c.l}</th>)}
+                    {COLS.map(c=><th key={c.k} style={{padding:"8px 5px",color:"var(--text-primary)",fontWeight:800,fontSize:14,textAlign:"center",width:c.w,borderRight:"1px solid var(--border-panel)",overflow:"hidden"}}>{c.l}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -2534,11 +2534,11 @@ function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)
         {view==="daily"&&(
           <div className="table-container" style={{borderRadius:"0 0 16px 16px", borderTop:"none"}}>
             <div className="scrollbar-free-table-wrapper" style={{overflowX:"auto"}}>
-              <table className="scrollbar-free-table" style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <table className="scrollbar-free-table" style={{width:"100%",borderCollapse:"collapse",fontSize:14}}>
                 <thead>
                   <tr style={{background:"var(--bg-card)"}}>
                     <th style={{padding:0,width:0,border:"none"}}></th>
-                    {COLS.map(c=><th key={c.k} style={{padding:"8px 5px",color:"var(--text-primary)",fontWeight:800,fontSize:12,textAlign:"center",width:c.w,borderRight:"1px solid var(--border-panel)",overflow:"hidden"}}>{c.l}</th>)}
+                    {COLS.map(c=><th key={c.k} style={{padding:"8px 5px",color:"var(--text-primary)",fontWeight:800,fontSize:14,textAlign:"center",width:c.w,borderRight:"1px solid var(--border-panel)",overflow:"hidden"}}>{c.l}</th>)}
                   </tr>
                 </thead>
                 <tbody>
