@@ -32,30 +32,13 @@ export function Sec({ title, icon, children }: { title: string; icon: string; ch
 }
 
 export function Clock() {
-  const [now,     setNow]    = useState(new Date());
-  const [offset,  setOffset] = useState(0);
-  const [synced,  setSynced] = useState(false);
-  const [full,    setFull]   = useState(false);
+  const [now, setNow] = useState(new Date());
+  const [full, setFull] = useState(false);
 
   useEffect(() => {
-    const sync = async () => {
-      try {
-        const res  = await fetch("https://worldtimeapi.org/api/timezone/Asia/Bangkok");
-        const data = await res.json();
-        const serverMs = new Date(data.datetime).getTime();
-        setOffset(serverMs - Date.now());
-        setSynced(true);
-      } catch { setSynced(false); }
-    };
-    sync();
-    const interval = setInterval(sync, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date(Date.now() + offset)), 1000);
+    const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
-  }, [offset]);
+  }, []);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === "Escape") setFull(false); };
@@ -81,7 +64,7 @@ export function Clock() {
             {dateStr}
           </div>
           <div style={{ position: "absolute", bottom: 40, display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 20, color: synced ? "#22c55e" : "#f59e0b" }}>●</span>
+            <span style={{ fontSize: 20, color: "#22c55e" }}>●</span>
           </div>
           <div style={{ position: "absolute", bottom: 20, fontSize: 16, color: "var(--text-secondary)", letterSpacing: 1 }}>
             กดที่หน้าจอหรือ ESC เพื่อปิด
@@ -94,7 +77,7 @@ export function Clock() {
           <div style={{ fontSize: 26, fontWeight: 800, color: "var(--accent-color)", fontFamily: "var(--font-mono)" }}>{timeStr}</div>
           <div style={{ fontSize: 12, color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end", marginTop: 2 }}>
             <span>{dateStr}</span>
-            <span style={{ color: synced ? "#22c55e" : "#f59e0b", fontSize: 10 }}>●</span>
+            <span style={{ color: "#22c55e", fontSize: 10 }}>●</span>
           </div>
         </div>
       </div>
