@@ -4460,7 +4460,7 @@ export default function App() {
       )}
 
       {/* Content — full width, responsive padding */}
-      <div style={{padding:"24px 5%",width:"100%",boxSizing:"border-box" as any,maxWidth:1400,margin:"0 auto"}}>
+      <div style={{padding:"24px clamp(16px, 2vw, 40px)",width:"100%",boxSizing:"border-box" as any,maxWidth:2400,margin:"0 auto"}}>
         {tab==="dashboard"&&<DashboardContent/>}
         {tab==="notam"    &&<NotamTab/>}
         {tab==="flight"   &&<FlightTab onOpenSafety={openSafety}/>}
