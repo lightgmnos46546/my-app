@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 
 // ── Google Sheets Sync ────────────────────────────────────────────────────────
 const GAS_URL = "https://script.google.com/macros/s/AKfycbxZEZnOBoCrRutNrHzvzLbJIuQv_8jbWvHXLJ4O-tjSrabjpXualOZgv8sld3EH8HA5/exec";
@@ -19,7 +19,8 @@ async function saveToSheet(sheetName: string, rows: any[][]) {
 async function loadFromSheet(sheetName: string): Promise<any[][]> {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000); // timeout 8 วินาที
+    const limit = sheetName === "Flight Schedule 201" ? 90000 : 15000;
+    const timeout = setTimeout(() => controller.abort(), limit);
     const res = await fetch(`${GAS_URL}?sheet=${encodeURIComponent(sheetName)}`, {
       signal: controller.signal
     });
@@ -78,7 +79,7 @@ function parseCSV(text: string): string[][] {
 
 async function loadNotamFromCSV(): Promise<any[][]> {
   try {
-    const spreadsheetId = "1T3Hn14YVKHtJBFzaX2R_8bAQI1iPZ4OFVmLRSd2Z1TI";
+    const spreadsheetId = "1FoXCR3ZaLxPk589NIZKck0orHc_Kb8LTgpXdTMY8K2k";
     const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&sheet=NOTAM`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
@@ -639,375 +640,732 @@ function classifyT(q) {
 }
 
 // ── Notam Tab ───────────────────────────────────────────────────────────────────
-function NotamTab() {
-  const [sel,setSel]       = useState(["VTBD"]);
-  const [prio,setPrio]     = useState("ALL");
-  const [seriesFilter, setSeriesFilter] = useState("ALL"); // "ALL" | "BLACK" | "BLUE"
-  const [region,setRegion] = useState("ทั้งหมด");
-  const [branch,setBranch] = useState("ทั้งหมด");
-  const [search,setSearch] = useState("");
-  const [exp,setExp]       = useState(null);
-  const [view,setView]     = useState("list");
-
-  // uploaded NOTAM data: { [icao]: [{id,p,t,raw}] }
-  const [uploadedNotams, setUploaded] = useState({});
-  const [fileName,  setFileName]  = useState(null);
-  const [fileDate,  setFileDate]  = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [parseErr,  setParseErr]  = useState(null);
-
-  // รวม NOTAM: uploaded ถ้ามี ไม่งั้นใช้ static
-  const activeNotams = Object.keys(uploadedNotams).length > 0 ? uploadedNotams : NOTAMS;
-
-  // โหลด JSZip ตอน component mount
-  useEffect(()=>{
-    if (window.JSZip) return;
-    const s = document.createElement("script");
-    s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
-    document.head.appendChild(s);
-  }, []);
-
-  // ดึงข้อมูล NOTAM จาก Google Sheets อัตโนมัติเมื่อแถบนี้ถูกโหลดขึ้นมา
-  useEffect(() => {
-    setUploading(true);
-    loadNotamFromCSV().then(rows => {
-      if (rows.length > 1) {
-        // แถวที่ 0 คือ Header: [ID, ICAO, Type, Start_Time, End_Time, Description, Status, Update_Time, Raw_Text]
-        // คัดกรองข้อมูลคอลัมน์ดัชนี 8 (Raw_Text) หรือดัชนี 5 (Description) ของแต่ละแถว และนำมารวมกันเป็นข้อความก้อนใหญ่
-        const rawTexts = rows.slice(1).map(r => {
-          let val = r[8] || r[5];
-          val = cleanRawText(val);
-          if (val && !val.trim().startsWith("(")) {
-            val = "(" + val.trim() + ")";
-          }
-          return val;
-        }).filter(Boolean).join("\n\n");
-        const parsed = parseNotamText(rawTexts);
-        
-        if (parsed.length > 0) {
-          const byAirport = {};
-          const ord = { HIGH: 0, MED: 1, LOW: 2 };
-          for (const n of parsed) {
-            for (const icao of n.icaos) {
-              if (!byAirport[icao]) byAirport[icao] = [];
-              if (!byAirport[icao].some(x => x.id === n.id)) byAirport[icao].push(n);
-            }
-          }
-          for (const k of Object.keys(byAirport)) {
-            byAirport[k].sort((a, b) => ord[a.p] - ord[b.p]);
-          }
-          setUploaded(byAirport);
-          setFileName("Google Sheets (ดึงอัตโนมัติ)");
-          setFileDate(new Date().toLocaleDateString("th-TH") + " (ปรับตามชีตล่าสุด)");
-          setSel(Object.keys(byAirport));
-        }
-      }
-      setUploading(false);
-    }).catch(err => {
-      console.error("เกิดข้อผิดพลาดในการโหลด NOTAM จาก Google Sheets:", err);
-      setUploading(false);
+function parseNotamRows(rawRows: any[][]): any[] {
+  if (rawRows.length <= 1) return [];
+  const headers = rawRows[0].map((h: string) => h.trim());
+  return rawRows.slice(1).map(row => {
+    const obj: any = {};
+    headers.forEach((h: string, idx: number) => {
+      obj[h] = row[idx] ? row[idx].trim() : "";
     });
-  }, []);
+    
+    // Header Adapter: map columns to internal keys
+    if (obj.ID && !obj.NOTAM_ID) obj.NOTAM_ID = obj.ID;
+    if (obj.ICAO && !obj.A_Line) obj.A_Line = obj.ICAO;
+    if (obj.Type && !obj.Section_Name) obj.Section_Name = obj.Type;
+    if (obj["คอลัมน์ 1"] && !obj.Raw_Text) obj.Raw_Text = obj["คอลัมน์ 1"];
+    if (obj.Description && !obj.Raw_Text) obj.Raw_Text = obj.Description;
+    if (obj.Status && !obj.Priority) obj.Priority = obj.Status;
+    if (obj.Status && !obj.Check_Status) obj.Check_Status = obj.Status;
+    if (obj.Check_Status === undefined) obj.Check_Status = "OK";
+    
+    return obj;
+  });
+}
 
-  // อ่าน .docx ด้วย JSZip — extract text จาก word/document.xml
-  const readDocx = async (file) => {
-    let tries = 0;
-    while (!window.JSZip && tries++ < 50) await new Promise(r=>setTimeout(r,100));
-    if (!window.JSZip) throw new Error("โหลด JSZip ไม่สำเร็จ — ลองใช้ไฟล์ .txt แทน");
-    const arr = await file.arrayBuffer();
-    const zip = await window.JSZip.loadAsync(arr);
-    const xml = await zip.file("word/document.xml").async("string");
-
-    // แปลง XML → plain text โดย:
-    // 1. แทน paragraph <w:p> ด้วย newline
-    // 2. แทน line break <w:br> ด้วย newline
-    // 3. รวม run text <w:t> ใน paragraph เดียวกันให้ต่อกัน
-    // 4. strip tags ที่เหลือ
-    const lines = [];
-    // split ที่ paragraph
-    const paras = xml.split(/<w:p[ />]/);
-    for (const para of paras) {
-      // รวม text จาก <w:t> ทั้งหมดใน paragraph นี้
-      const texts = [...para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map(m=>m[1]);
-      const line = texts.join("").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&").replace(/&#xD;/g,"");
-      lines.push(line);
-    }
-    return lines.join("\n").replace(/\n{3,}/g,"\n\n").trim();
+function getDisplayGroup(row: any) {
+  /* ─── Master airport list & names (single source of truth) ─── */
+  const ALLOWED_AIRPORTS = [
+    "VTBD", "VTBU", "VTBK", "VTBL", "VTPI", "VTUN", "VTUD", "VTUU",
+    "VTPP", "VTCC", "VTSB", "VTSS", "VTSK", "VTPH", "VTBP", "VTBW"
+  ];
+  const AIRPORT_NAMES: Record<string, string> = {
+    VTBD: "สนามบินดอนเมือง",
+    VTBU: "สนามบินอู่ตะเภา",
+    VTBK: "สนามบินกำแพงแสน",
+    VTBL: "สนามบินโคกกะเทียม",
+    VTPI: "สนามบินตาคลี",
+    VTUN: "สนามบินโคราช",
+    VTUD: "สนามบินอุดรธานี",
+    VTUU: "สนามบินอุบล",
+    VTPP: "สนามบินพิษณุโลก",
+    VTCC: "สนามบินเชียงใหม่",
+    VTSB: "สนามบินสุราษฎร์",
+    VTSS: "สนามบินหาดใหญ่",
+    VTSK: "สนามบินปัตตานี",
+    VTPH: "สนามบินหัวหิน",
+    VTBP: "สนามบินประจวบ",
+    VTBW: "สนามบินวัฒนานคร",
   };
 
-  const [pendingBlocks, setPending]  = useState(null); // blocks รอ validate
-  const [debugText,     setDebugText] = useState(null);
+  /* ── อันดับ 1: Section_Airport ── */
+  const secApt = (row.Section_Airport || "").trim().toUpperCase();
+  if (secApt) {
+    return {
+      groupKey:   secApt,
+      groupTitle: `${secApt} ${AIRPORT_NAMES[secApt] || ""}`.trim(),
+      groupType:  "AIRPORT",
+      source:     "Section_Airport",
+    };
+  }
 
-  const handleFile = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setUploading(true); setParseErr(null); setDebugText(null);
-    try {
-      let text = "";
-      if (file.name.endsWith(".docx")) {
-        text = await readDocx(file);
-      } else {
-        text = await file.text();
+  /* ── อันดับ 2: A_Line ── */
+  const aLineRaw = (row.A_Line || "").trim().toUpperCase();
+  if (aLineRaw && ALLOWED_AIRPORTS.includes(aLineRaw)) {
+    return {
+      groupKey:   aLineRaw,
+      groupTitle: `${aLineRaw} ${AIRPORT_NAMES[aLineRaw] || ""}`.trim(),
+      groupType:  "AIRPORT",
+      source:     "A_Line",
+    };
+  }
+
+  /* ── อันดับ 3: Section_Name หมวดพิเศษ ── */
+  // keyword → {groupKey, groupTitle}
+  const SPECIAL_MAP: Array<{ kw: string; key: string; title: string }> = [
+    { kw: "FLIGHT PLANNING", key: "FLIGHT PLANNING",   title: "FLIGHT PLANNING : ROUTE" },
+    { kw: "GUN FIRING",      key: "GUN FIRING",        title: "GUN FIRING" },
+    { kw: "PJE",             key: "PJE",               title: "PJE" },
+    { kw: "UNMANNED AIRCRAFT",key:"UNMANNED AIRCRAFT", title: "UNMANNED AIRCRAFT" },
+    { kw: "AERIAL PHOTO",    key: "AERIAL PHOTO",      title: "AERIAL PHOTO" },
+    { kw: "UPDATE AIP",      key: "UPDATE AIP THAILAND",title:"UPDATE AIP THAILAND" },
+    { kw: "BANGKOK FIR",     key: "VTBB_AREA",         title: "VTBB / BANGKOK FIR / AREA" },
+    { kw: "AREA",            key: "AREA",              title: "AREA" },
+  ];
+  const secName = (row.Section_Name || "").trim().toUpperCase();
+  if (secName) {
+    for (const { kw, key, title } of SPECIAL_MAP) {
+      if (secName.includes(kw)) {
+        return { groupKey: key, groupTitle: title, groupType: "SPECIAL", source: "Section_Name" };
       }
-
-      // Debug: แสดง 500 chars แรกเพื่อตรวจ format
-      setDebugText(text.slice(0, 600));
-
-      const parsed = parseNotamText(text);
-      if (parsed.length === 0) { setParseErr("ไม่พบ NOTAM blocks — ตรวจสอบรูปแบบไฟล์"); setUploading(false); return; }
-
-      // แสดง validation modal ก่อน import
-      setPending(parsed);
-      setFileName(file.name);
-    } catch(err) {
-      setParseErr("เกิดข้อผิดพลาด: " + err.message);
     }
-    setUploading(false);
-    e.target.value = "";
+  }
+
+  /* ── อันดับ 4: A_Line = VTBB หรือ Raw_Text มี "A) VTBB" ── */
+  const rawText = (row.Raw_Text || "").toUpperCase();
+  if (
+    aLineRaw === "VTBB" ||
+    rawText.includes("A) VTBB") ||
+    rawText.includes("A)VTBB")
+  ) {
+    return {
+      groupKey:   "VTBB_AREA",
+      groupTitle: "VTBB / BANGKOK FIR / AREA",
+      groupType:  "AREA",
+      source:     "A_Line_OR_Raw_Text",
+    };
+  }
+
+  /* ── อันดับ 5: Fallback ── */
+  return {
+    groupKey:   "UNCLASSIFIED",
+    groupTitle: "UNCLASSIFIED / ตรวจสอบเพิ่มเติม",
+    groupType:  "UNKNOWN",
+    source:     "Fallback",
+  };
+}
+
+function groupNotamsForDisplay(rows: any[]) {
+  const groups: Record<string, { groupKey: string, groupTitle: string, groupType: string, list: any[] }> = {};
+  
+  for (const r of rows) {
+    const grp = getDisplayGroup(r);
+    if (!groups[grp.groupKey]) {
+      groups[grp.groupKey] = {
+        groupKey: grp.groupKey,
+        groupTitle: grp.groupTitle,
+        groupType: grp.groupType,
+        list: []
+      };
+    }
+    groups[grp.groupKey].list.push(r);
+  }
+  
+  return groups;
+}
+
+function sortGroups(groups: any): string[] {
+  const keys = Array.isArray(groups) ? groups : Object.keys(groups);
+  /* ลำดับการแสดงผลตาม spec */
+  const ORDER = [
+    // 1. สนามบินใน ALLOWED_AIRPORTS ตามลำดับที่กำหนด
+    "VTBD", "VTBU", "VTBK", "VTBL", "VTPI", "VTUN", "VTUD", "VTUU",
+    "VTPP", "VTCC", "VTSB", "VTSS", "VTSK", "VTPH", "VTBP", "VTBW",
+    // 2. VTBB / BANGKOK FIR / AREA
+    "VTBB_AREA",
+    // 3-10. หมวดพิเศษ
+    "FLIGHT PLANNING",
+    "GUN FIRING",
+    "PJE",
+    "UNMANNED AIRCRAFT",
+    "AERIAL PHOTO",
+    "AREA",
+    "UPDATE AIP THAILAND",
+    "UNCLASSIFIED",
+  ];
+  return [...keys].sort((a, b) => {
+    const idxA = ORDER.indexOf(a) === -1 ? 9999 : ORDER.indexOf(a);
+    const idxB = ORDER.indexOf(b) === -1 ? 9999 : ORDER.indexOf(b);
+    return idxA - idxB;
+  });
+}
+
+function filterNotams(rows: any[], options: { search: string, groupFilter: string, statusFilter: string }) {
+  return rows.filter(r => {
+    // 1. Search text filter
+    if (options.search) {
+      const q = options.search.toUpperCase().trim();
+      const notamId = (r.NOTAM_ID || "").toUpperCase();
+      const rawText = (r.Raw_Text || "").toUpperCase();
+      if (!notamId.includes(q) && !rawText.includes(q)) {
+        return false;
+      }
+    }
+    
+    // 2. Group Filter
+    if (options.groupFilter && options.groupFilter !== "ALL") {
+      const grp = getDisplayGroup(r);
+      if (grp.groupKey !== options.groupFilter) {
+        return false;
+      }
+    }
+    
+    // 3. Status Filter
+    if (options.statusFilter && options.statusFilter !== "ALL") {
+      const isOK = (r.Check_Status || "").trim().toUpperCase() === "OK";
+      if (options.statusFilter === "OK" && !isOK) return false;
+      if (options.statusFilter === "CHECK" && isOK) return false;
+    }
+    
+    return true;
+  });
+}
+
+function NotamTab() {
+  /* ─── STATE ─── */
+  const [rawRows, setRawRows]         = useState<any[]>([]);
+  const [search, setSearch]           = useState("");
+  const [selAirports, setSelAirports] = useState<string[]>([]);
+  const [regionFilter, setRegionFilter] = useState("ALL");
+  const [priorityFilter, setPriorityFilter] = useState("ALL");
+  const [rawMode, setRawMode]         = useState(false);
+  const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState<string | null>(null);
+  const [refreshKey, setRefreshKey]   = useState(0);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  /* ─── CONSTANTS ─── */
+  const ALLOWED_AIRPORTS = [
+    { icao:"VTBD", name:"ดอนเมือง"    },
+    { icao:"VTBU", name:"อู่ตะเภา"    },
+    { icao:"VTBK", name:"กำแพงแสน"   },
+    { icao:"VTBL", name:"โคกกะเทียม"  },
+    { icao:"VTPI", name:"ตาคลี"       },
+    { icao:"VTUN", name:"โคราช"       },
+    { icao:"VTUD", name:"อุดรธานี"    },
+    { icao:"VTUU", name:"อุบลราชธานี" },
+    { icao:"VTPP", name:"พิษณุโลก"   },
+    { icao:"VTCC", name:"เชียงใหม่"  },
+    { icao:"VTSB", name:"สุราษฎร์"   },
+    { icao:"VTSS", name:"หาดใหญ่"    },
+    { icao:"VTSK", name:"ปัตตานี"     },
+    { icao:"VTPH", name:"หัวหิน"     },
+    { icao:"VTBP", name:"ประจวบฯ"    },
+    { icao:"VTBW", name:"วัฒนานคร"  },
+  ];
+
+  const REGION_MAP: Record<string, string[]> = {
+    "กทม.":     ["VTBD","VTBU","VTBS"],
+    "เหนือ":    ["VTCC","VTPP","VTLU","VTUD"],
+    "อีสาน":   ["VTUN","VTUD","VTUU"],
+    "ใต้":      ["VTSB","VTSS","VTSK"],
+    "เหนือกทม.":["VTBL","VTBK","VTPI","VTPH","VTBP","VTBW"],
   };
 
-  const clearUpload = () => { setUploaded({}); setFileName(null); setFileDate(null); setSel(["VTBD"]); };
+  /* ─── LOAD DATA ─── */
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    loadNotamFromCSV()
+      .then(rows => {
+        if (rows.length > 1) {
+          const parsed = parseNotamRows(rows);
+          setRawRows(parsed);
+        } else {
+          setError("ไม่พบข้อมูล NOTAM ในสเปรดชีต");
+        }
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error("Error loading NOTAMs:", err);
+        setError("เกิดข้อผิดพลาดในการโหลดข้อมูลจาก Google Sheet");
+        setLoading(false);
+      });
+  }, [refreshKey]);
 
-  const filtAp = AIRPORTS.filter(a=>
-    (region==="ทั้งหมด"||a.region===region)&&
-    (branch==="ทั้งหมด"||a.branch===branch)
+  /* ─── HELPERS ─── */
+  function getPri(p: string) {
+    const s = (p || "").toLowerCase();
+    if (s.includes("critical"))  return { key:"Critical",  label:"Critical",  emoji:"🔴", color:"#fca5a5", border:"#ef4444", bg:"rgba(239,68,68,0.08)" };
+    if (s.includes("important")) return { key:"Important", label:"Important", emoji:"🟡", color:"#fde68a", border:"#f59e0b", bg:"rgba(251,191,36,0.08)" };
+    if (s.includes("advisory"))  return { key:"Advisory",  label:"Advisory",  emoji:"🟠", color:"#fed7aa", border:"#f97316", bg:"rgba(251,146,60,0.08)" };
+    return                              { key:"Info",      label:"Info",      emoji:"🔵", color:"#93c5fd", border:"#3b82f6", bg:"rgba(59,130,246,0.08)" };
+  }
+
+  /* airport → count from grouping logic */
+  const airportCount: Record<string,number> = {};
+  rawRows.forEach(r => {
+    const { groupKey, groupType } = getDisplayGroup(r);
+    if (groupType === "AIRPORT") {
+      airportCount[groupKey] = (airportCount[groupKey] || 0) + 1;
+    }
+  });
+
+  /* ─── FILTERS ─── */
+  const filtered = rawRows.filter(r => {
+    // Region filter → populates selAirports implicitly
+    if (regionFilter !== "ALL") {
+      const ap = (r.A_Line||"").trim().toUpperCase();
+      const regionAps = REGION_MAP[regionFilter] || [];
+      if (!regionAps.includes(ap)) return false;
+    }
+    // Airport filter
+    if (selAirports.length > 0) {
+      const { groupKey, groupType } = getDisplayGroup(r);
+      if (groupType !== "AIRPORT" || !selAirports.includes(groupKey)) return false;
+    }
+    // Priority filter
+    if (priorityFilter !== "ALL") {
+      if (getPri(r.Priority).key !== priorityFilter) return false;
+    }
+    // Search
+    if (search.trim()) {
+      const q = search.trim().toUpperCase();
+      if (!(r.NOTAM_ID||"").toUpperCase().includes(q) &&
+          !(r.Raw_Text||"").toUpperCase().includes(q)  &&
+          !(r.A_Line  ||"").toUpperCase().includes(q)  &&
+          !(r.Section_Name||"").toUpperCase().includes(q)) return false;
+    }
+    return true;
+  });
+
+  /* group by priority → sub-group by Section_No+Section_Name */
+  const PRI_ORDER = ["Critical","Important","Advisory","Info"];
+  const byPri: Record<string, any[]> = { Critical:[], Important:[], Advisory:[], Info:[] };
+  filtered.forEach(r => { byPri[getPri(r.Priority).key].push(r); });
+
+  const critCount = byPri.Critical.length;
+  const impCount  = byPri.Important.length;
+  const advCount  = byPri.Advisory.length;
+
+  /* derived metadata */
+  const docDate  = rawRows.length > 0 ? (rawRows[0].Document_Date || "") : "";
+  const procTime = rawRows.length > 0 ? (rawRows[0].Processed_At  || "") : "";
+  let procFmt = procTime;
+  try { if (procTime) { const d = new Date(procTime); if (!isNaN(d.getTime())) procFmt = d.toLocaleString("th-TH"); } } catch(_){}
+
+  /* expand/collapse */
+  const toggleExpand = (id: string) => {
+    setExpandedIds(prev => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  };
+  const toggleAirport = (icao: string) => {
+    setSelAirports(prev => prev.includes(icao) ? prev.filter(a => a !== icao) : [...prev, icao]);
+  };
+
+  /* ─── LOADING / ERROR ─── */
+  if (loading) return (
+    <div style={{ textAlign:"center", padding:"60px 0", color:"var(--text-secondary)" }}>
+      <div className="spinner" style={{ marginBottom:12 }}></div>
+      <div>กำลังดึงข้อมูล NOTAM จาก Google Sheets...</div>
+    </div>
+  );
+  if (error) return (
+    <div style={{ background:"rgba(239,68,68,0.05)", border:"1px solid rgba(239,68,68,0.2)", borderRadius:12, padding:24, textAlign:"center", color:"#fca5a5" }}>
+      <div style={{ fontSize:32, marginBottom:8 }}>⚠️</div>
+      <div style={{ fontSize:16, fontWeight:700, marginBottom:4 }}>ดาวน์โหลดข้อมูลล้มเหลว</div>
+      <div style={{ fontSize:14, opacity:0.8 }}>{error}</div>
+      <button onClick={()=>setRefreshKey(k=>k+1)} style={{ marginTop:14, padding:"8px 20px", borderRadius:8, background:"rgba(239,68,68,0.15)", border:"1px solid #ef4444", color:"#fca5a5", cursor:"pointer", fontWeight:700 }}>
+        ลองใหม่อีกครั้ง
+      </button>
+    </div>
   );
 
-  const allNtms = sel.flatMap(icao=>{
-    const ap=AIRPORTS.find(a=>a.icao===icao);
-    return (activeNotams[icao]||[]).map(n=>({...n,icao,apName:ap?.name||icao,branch:ap?.branch}));
-  }).filter(n=>{
-    if(prio!=="ALL"&&n.p!==prio) return false;
-    if(seriesFilter==="BLACK"&&n.id.startsWith("J")) return false;
-    if(seriesFilter==="BLUE"&&!n.id.startsWith("J")) return false;
-    if(search&&!n.raw.toUpperCase().includes(search.toUpperCase())&&!n.icao.includes(search.toUpperCase())) return false;
-    return true;
-  }).sort((a,b)=>({HIGH:0,MED:1,LOW:2}[a.p]-{HIGH:0,MED:1,LOW:2}[b.p]));
+  /* ══════════════════════════════════════════════════════ RENDER ══ */
+  return (
+    <div style={{ width:"100%", display:"flex", flexDirection:"column", gap:14 }}>
 
-  const totalHigh = Object.values(activeNotams).flat().filter(n=>{
-    if(seriesFilter==="BLACK"&&n.id.startsWith("J")) return false;
-    if(seriesFilter==="BLUE"&&!n.id.startsWith("J")) return false;
-    return n.p==="HIGH";
-  }).length;
-  const isUploaded = Object.keys(uploadedNotams).length > 0;
-
-  const handleConfirmImport = (validBlocks) => {
-    const byAirport = {};
-    const ord = {HIGH:0,MED:1,LOW:2};
-    for (const n of validBlocks) {
-      for (const icao of n.icaos) {
-        if (!byAirport[icao]) byAirport[icao] = [];
-        if (!byAirport[icao].some(x=>x.id===n.id)) byAirport[icao].push(n);
-      }
-    }
-    for (const k of Object.keys(byAirport)) byAirport[k].sort((a,b)=>ord[a.p]-ord[b.p]);
-    setUploaded(byAirport);
-    setFileDate(new Date().toLocaleString("th-TH"));
-    setSel(Object.keys(byAirport));
-    setPending(null);
-  };
-
-  return <div>
-    {/* Validation modal */}
-    {pendingBlocks && (
-      <ValidationModal
-        blocks={pendingBlocks}
-        onConfirm={handleConfirmImport}
-        onCancel={()=>{ setPending(null); setFileName(null); }}
-      />
-    )}
-    {/* ── Upload bar ── */}
-    <div style={{background:"rgba(15,23,42,0.95)",border:"1px solid #1e3a5f",borderRadius:15,padding:"18px 22px",marginBottom:15}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-        <span style={{fontWeight:700,color:"#60a5fa",fontSize:16}}>📡 NOTAM CENTER</span>
-        <div style={{flex:1}}/>
-
-        {/* source badge */}
-        {isUploaded
-          ? <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <span style={{fontSize:14,background:"#14532d",color:"#86efac",padding:"3px 12px",borderRadius:25,fontWeight:700}}>
-                📄 {fileName}
-              </span>
-              <span style={{fontSize:14,color:"var(--text-secondary)"}}>{fileDate}</span>
-              <button onClick={clearUpload} style={{fontSize:14,padding:"3px 12px",borderRadius:6,border:"1px solid #ef4444",background:"transparent",color:"#ef4444",cursor:"pointer"}}>✕ ล้าง</button>
-            </div>
-          : <span style={{fontSize:14,color:"var(--text-secondary)"}}>ใช้ข้อมูลตัวอย่าง (อัปโหลดไฟล์จริงด้านล่าง)</span>
-        }
-
-        {/* Upload button */}
-        <label style={{background:isUploaded?"#1e3a5f":"#1d4ed8",border:"none",color:"#fff",borderRadius:9,padding:"9px 20px",fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
-          {uploading ? "⏳ กำลังอ่าน..." : "📂 อัปโหลด NOTAM"}
-          <input type="file" accept=".txt,.docx,.ics" onChange={handleFile} style={{display:"none"}} disabled={uploading}/>
-        </label>
+      {/* ── 1. HEADER BAR ── */}
+      <div style={{
+        background:"rgba(15,23,42,0.97)",
+        border:"1px solid var(--border-panel)",
+        borderRadius:14,
+        padding:"14px 18px",
+        display:"flex",
+        alignItems:"center",
+        flexWrap:"wrap",
+        gap:10
+      }}>
+        <span style={{ fontSize:18, marginRight:2 }}>📡</span>
+        <span style={{ fontWeight:900, fontSize:17, color:"var(--text-primary)", letterSpacing:0.5, flex:1 }}>
+          NOTAM CENTER
+        </span>
+        <a href="https://docs.google.com/spreadsheets/d/1FoXCR3ZaLxPk589NIZKck0orHc_Kb8LTgpXdTMY8K2k/edit#gid=0"
+          target="_blank" rel="noreferrer"
+          style={{
+            background:"rgba(34,197,94,0.12)", border:"1px solid #22c55e",
+            color:"#22c55e", borderRadius:8, padding:"4px 12px",
+            fontSize:12, fontWeight:700, textDecoration:"none",
+            display:"flex", alignItems:"center", gap:5
+          }}>
+          📊 Google Sheets (ดึงข้อมูลอัตโนมัติ)
+        </a>
+        {(docDate||procFmt) && (
+          <span style={{ fontSize:12, color:"var(--text-secondary)" }}>
+            {docDate}{procFmt ? ` (ปรับปรุงล่าสุด ${procFmt})` : ""}
+          </span>
+        )}
+        {(selAirports.length > 0 || regionFilter !== "ALL") && (
+          <button onClick={()=>{ setSelAirports([]); setRegionFilter("ALL"); }} style={{
+            background:"rgba(239,68,68,0.1)", border:"1px solid #ef4444",
+            color:"#ef4444", borderRadius:8, padding:"4px 12px",
+            cursor:"pointer", fontSize:12, fontWeight:700
+          }}>✕ ล้าง</button>
+        )}
+        <button onClick={()=>setRefreshKey(k=>k+1)} style={{
+          background:"rgba(34,197,94,0.12)", border:"1px solid #22c55e",
+          color:"#22c55e", borderRadius:8, padding:"4px 14px",
+          cursor:"pointer", fontSize:12, fontWeight:700
+        }}>↻ ซิงโหลด NOTAM</button>
       </div>
 
-      {/* Debug: extracted text preview */}
-      {debugText && (
-        <div style={{marginTop:10,background:"#020817",borderRadius:8,padding:"12px 15px"}}>
-          <div style={{fontSize:14,color:"#60a5fa",marginBottom:5,fontWeight:700}}>🔍 Debug — text ที่ extract ได้ (600 chars แรก):</div>
-          <pre style={{margin:0,fontSize:14,color:"var(--text-secondary)",whiteSpace:"pre-wrap",wordBreak:"break-word",lineHeight:2,maxHeight:250,overflow:"auto"}}>{debugText}</pre>
-        </div>
-      )}
-
-      {/* Error */}
-      {parseErr && <div style={{marginTop:10,fontSize:15,color:"#fca5a5",background:"rgba(239,68,68,0.1)",borderRadius:8,padding:"8px 12px"}}>⚠️ {parseErr}</div>}
-
-      {/* Upload instructions */}
-      {!isUploaded && (
-        <div style={{marginTop:12,fontSize:14,color:"#334155",lineHeight:2}}>
-          รองรับไฟล์: <span style={{color:"#60a5fa"}}>.txt</span> หรือ <span style={{color:"#60a5fa"}}>.docx</span> ที่ได้จาก Base Ops RTAF — parser จะอ่าน NOTAM blocks (Q/A/B/C/E) แล้วจัดกลุ่มตาม ICAO อัตโนมัติ
-        </div>
-      )}
-    </div>
-
-    {/* ── Filter panel ── */}
-    <div style={{background:"rgba(15,23,42,0.9)",border:"1px solid #1e3a5f",borderRadius:15,padding:"18px 22px",marginBottom:18}}>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-        <span style={{fontSize:14,color:"var(--text-secondary)",alignSelf:"center"}}>ภาค:</span>
-        {["ทั้งหมด","กลาง","เหนือ","อีสาน","ใต้"].map(r=>(
-          <button key={r} onClick={()=>setRegion(r)} style={{padding:"3px 12px",fontSize:14,borderRadius:6,border:`1px solid ${region===r?"#38bdf8":"#1e3a5f"}`,background:region===r?"#0c4a6e":"transparent",color:region===r?"#38bdf8":"var(--text-secondary)",cursor:"pointer"}}>{r}</button>
+      {/* ── 2. REGION + RAW MODE ── */}
+      <div style={{
+        background:"rgba(15,23,42,0.9)",
+        border:"1px solid var(--border-panel)",
+        borderRadius:14,
+        padding:"10px 16px",
+        display:"flex",
+        alignItems:"center",
+        gap:8,
+        flexWrap:"wrap"
+      }}>
+        <span style={{ fontSize:12, color:"var(--text-secondary)", fontWeight:700, marginRight:4 }}>ภาค:</span>
+        {["ALL","กทม.","เหนือ","อีสาน","ใต้","เหนือกทม.","ทั่วไป"].map(r => (
+          <button key={r}
+            onClick={() => { setRegionFilter(r); setSelAirports([]); }}
+            style={{
+              background: regionFilter===r ? "rgba(56,189,248,0.18)" : "rgba(255,255,255,0.04)",
+              border:`1px solid ${regionFilter===r?"#38bdf8":"var(--border-panel)"}`,
+              color: regionFilter===r ? "#38bdf8" : "var(--text-secondary)",
+              borderRadius:8, padding:"4px 12px",
+              cursor:"pointer", fontSize:12, fontWeight:700
+            }}>
+            {r === "ALL" ? "พื้นที่แตก" : r}
+          </button>
         ))}
-        <span style={{fontSize:14,color:"var(--text-secondary)",alignSelf:"center",marginLeft:10}}>เหล่าทัพ:</span>
-        {["ทั้งหมด","ทอ.","ทบ.","ทร."].map(b=>(
-          <button key={b} onClick={()=>setBranch(b)} style={{padding:"3px 12px",fontSize:14,borderRadius:6,border:`1px solid ${branch===b?(BC[b]||"#38bdf8"):"#1e3a5f"}`,background:branch===b?(BC[b]||"#38bdf8")+"22":"transparent",color:branch===b?(BC[b]||"#38bdf8"):"var(--text-secondary)",cursor:"pointer"}}>{b}</button>
-        ))}
-        <div style={{flex:1}}/>
-        <div style={{display:"flex",gap:3}}>
-          <button onClick={()=>setView("list")} style={{padding:"3px 12px",fontSize:14,borderRadius:6,border:`1px solid ${view==="list"?"#38bdf8":"#1e3a5f"}`,background:view==="list"?"#0c4a6e":"transparent",color:view==="list"?"#38bdf8":"var(--text-secondary)",cursor:"pointer"}}>≡ รายการ</button>
-          <button onClick={()=>setView("airport")} style={{padding:"3px 12px",fontSize:14,borderRadius:6,border:`1px solid ${view==="airport"?"#38bdf8":"#1e3a5f"}`,background:view==="airport"?"#0c4a6e":"transparent",color:view==="airport"?"#38bdf8":"var(--text-secondary)",cursor:"pointer"}}>⊞ แยกสนาม</button>
-        </div>
+        <div style={{ flex:1 }}/>
+        {selAirports.length > 0 && (
+          <button onClick={()=>setSelAirports([])} style={{
+            background:"transparent", border:"1px solid var(--border-panel)",
+            color:"var(--text-secondary)", borderRadius:8, padding:"4px 12px",
+            cursor:"pointer", fontSize:12, fontWeight:700
+          }}>ยกเลิก</button>
+        )}
+        <button onClick={()=>setRawMode(m=>!m)} style={{
+          background: rawMode ? "rgba(251,191,36,0.15)" : "rgba(255,255,255,0.04)",
+          border:`1px solid ${rawMode?"#f59e0b":"var(--border-panel)"}`,
+          color: rawMode ? "#fde68a" : "var(--text-secondary)",
+          borderRadius:8, padding:"4px 12px",
+          cursor:"pointer", fontSize:12, fontWeight:700
+        }}>
+          {rawMode ? "✓ โหมดดิบ (RAW)" : "โหมดดิบ (RAW)"}
+        </button>
       </div>
 
-      {/* Airport selector */}
-      <div style={{background:"#020817",borderRadius:10,padding:10,marginBottom:12}}>
-        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-          <span style={{fontSize:14,color:"var(--text-secondary)",fontWeight:700}}>เลือกสนามบิน</span>
-          <span style={{fontSize:14,color:"#38bdf8",background:"#0c4a6e",padding:"1px 10px",borderRadius:12}}>{sel.length}/{filtAp.length}</span>
-          <div style={{flex:1}}/>
-          <button onClick={()=>setSel(filtAp.map(a=>a.icao))} style={{fontSize:12,padding:"2px 10px",borderRadius:5,background:"#1e3a5f",border:"none",color:"#60a5fa",cursor:"pointer"}}>ทั้งหมด</button>
-          <button onClick={()=>setSel([])} style={{fontSize:12,padding:"2px 10px",borderRadius:5,background:"#1e3a5f",border:"none",color:"#ef4444",cursor:"pointer"}}>ยกเลิก</button>
+      {/* ── 3. AIRPORT BUTTONS ── */}
+      <div style={{
+        background:"rgba(15,23,42,0.9)",
+        border:"1px solid var(--border-panel)",
+        borderRadius:14,
+        padding:"12px 16px"
+      }}>
+        <div style={{ fontSize:12, color:"var(--text-secondary)", fontWeight:800, marginBottom:10 }}>
+          เลือกสนามบิน {selAirports.length > 0 ? `${selAirports.length}/${ALLOWED_AIRPORTS.length}` : `0/${ALLOWED_AIRPORTS.length}`}
+          <span style={{ marginLeft:6, fontWeight:400, color:"#64748b" }}>· คลิกเพื่อกรอง</span>
         </div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-          {filtAp.map(ap=>{
-            const isS=sel.includes(ap.icao);
-            const listFiltered = (activeNotams[ap.icao]||[]).filter(n=>{
-              if(seriesFilter==="BLACK"&&n.id.startsWith("J")) return false;
-              if(seriesFilter==="BLUE"&&!n.id.startsWith("J")) return false;
-              return true;
-            });
-            const cnt=listFiltered.length;
-            const hi=listFiltered.filter(n=>n.p==="HIGH").length;
-            const bc=BC[ap.branch]||"var(--text-secondary)";
-            return <button key={ap.icao} onClick={()=>setSel(p=>p.includes(ap.icao)?p.filter(x=>x!==ap.icao):[...p,ap.icao])}
-              title={ap.name} style={{padding:"6px 10px",borderRadius:8,border:`1px solid ${isS?bc:"#1e293b"}`,background:isS?bc+"22":"#0f172a",cursor:"pointer",position:"relative",minWidth:78}}>
-              <div style={{fontSize:15,fontWeight:800,color:isS?bc:"var(--text-secondary)",fontFamily:"monospace"}}>{ap.icao}</div>
-              <div style={{fontSize:11,color:isS?"#94a3b8":"#334155"}}>{ap.branch}</div>
-              {cnt>0&&<span style={{position:"absolute",top:-4,right:-4,width:18,height:18,borderRadius:"50%",background:hi>0?"#ef4444":"#f59e0b",fontSize:11,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>{cnt}</span>}
-            </button>;
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+          {ALLOWED_AIRPORTS.map(apt => {
+            const cnt   = airportCount[apt.icao] || 0;
+            const isSel = selAirports.includes(apt.icao);
+            const hasN  = cnt > 0;
+            // priority colour of highest notam in this airport
+            const apRows = rawRows.filter(r => getDisplayGroup(r).groupKey === apt.icao);
+            const hasCrit = apRows.some(r => getPri(r.Priority).key === "Critical");
+            const hasImp  = !hasCrit && apRows.some(r => getPri(r.Priority).key === "Important");
+            const hasAdv  = !hasCrit && !hasImp && hasN;
+            const dotColor = hasCrit ? "#ef4444" : hasImp ? "#f59e0b" : hasAdv ? "#f97316" : "#3b82f6";
+            return (
+              <button key={apt.icao} onClick={()=>toggleAirport(apt.icao)}
+                title={apt.name}
+                style={{
+                  background: isSel ? "rgba(56,189,248,0.18)" : hasN ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.02)",
+                  border:`1.5px solid ${isSel ? "#38bdf8" : hasN ? dotColor+"66" : "var(--border-panel)"}`,
+                  borderRadius:9,
+                  padding:"5px 8px 4px",
+                  cursor:"pointer",
+                  display:"flex", flexDirection:"column", alignItems:"center",
+                  gap:2, minWidth:50
+                }}>
+                <span style={{
+                  fontWeight:900, fontSize:12,
+                  color: isSel ? "#38bdf8" : hasN ? dotColor : "var(--text-secondary)"
+                }}>{apt.icao}</span>
+                {hasN ? (
+                  <span style={{ fontSize:9, color:dotColor, fontWeight:800, lineHeight:1 }}>●</span>
+                ) : (
+                  <span style={{ fontSize:9, color:"#334155", lineHeight:1 }}>○</span>
+                )}
+                {hasN && (
+                  <span style={{ fontSize:9, color:"var(--text-secondary)", lineHeight:1 }}>{cnt}</span>
+                )}
+              </button>
+            );
           })}
         </div>
       </div>
 
-      {/* ประเภท NOTAM (สีดำ/สีฟ้า) */}
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
-        <span style={{fontSize:14,color:"var(--text-secondary)",alignSelf:"center"}}>ประเภท NOTAM:</span>
-        {[
-          {id:"ALL",label:"ทั้งหมด",color:"#38bdf8"},
-          {id:"BLACK",label:"NOTAM สนามบิน (สีดำ - Series A/C)",color:"#e2e8f0"},
-          {id:"BLUE",label:"NOTAM กิจกรรมน่านฟ้า (สีฟ้า - Series J)",color:"#60a5fa"}
-        ].map(t=>(
-          <button key={t.id} onClick={()=>setSeriesFilter(t.id)} 
-            style={{padding:"5px 12px",fontSize:14,borderRadius:6,
-              border:`1px solid ${seriesFilter===t.id?t.color:"#1e3a5f"}`,
-              background:seriesFilter===t.id?t.color+"22":"transparent",
-              color:seriesFilter===t.id?t.color:"var(--text-secondary)",
-              cursor:"pointer",fontWeight:700}}>
-            {t.label}
+      {/* ── 4. PRIORITY TABS + SEARCH ── */}
+      <div style={{
+        background:"rgba(15,23,42,0.9)",
+        border:"1px solid var(--border-panel)",
+        borderRadius:14,
+        padding:"10px 16px",
+        display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"
+      }}>
+        <span style={{ fontSize:12, color:"var(--text-secondary)", fontWeight:800 }}>ประเภท NOTAM:</span>
+        {([
+          { k:"ALL",      l:"ทั้งตัว",   cnt:filtered.length },
+          { k:"Critical", l:"Critical",  cnt:critCount, emoji:"🔴" },
+          { k:"Important",l:"Important", cnt:impCount,  emoji:"🟡" },
+          { k:"Advisory", l:"Advisory",  cnt:advCount,  emoji:"🟠" },
+        ] as Array<{k:string,l:string,cnt:number,emoji?:string}>).map(f => (
+          <button key={f.k}
+            onClick={() => setPriorityFilter(f.k)}
+            style={{
+              background: priorityFilter===f.k ? "rgba(56,189,248,0.15)" : "transparent",
+              border:`1px solid ${priorityFilter===f.k?"#38bdf8":"var(--border-panel)"}`,
+              color: priorityFilter===f.k ? "#38bdf8" : "var(--text-secondary)",
+              borderRadius:8, padding:"4px 12px",
+              cursor:"pointer", fontSize:12, fontWeight:700,
+              display:"flex", alignItems:"center", gap:5
+            }}>
+            {f.emoji && <span>{f.emoji}</span>}
+            {f.l}
+            {f.cnt > 0 && (
+              <span style={{
+                background: f.k==="Critical"?"#ef4444":f.k==="Important"?"#f59e0b":f.k==="Advisory"?"#f97316":"#38bdf8",
+                color:"#fff", borderRadius:10,
+                padding:"0 6px", fontSize:10, fontWeight:900
+              }}>{f.cnt}</span>
+            )}
           </button>
         ))}
+        <div style={{ flex:1, minWidth:160 }}>
+          <input
+            value={search}
+            onChange={e=>setSearch(e.target.value)}
+            placeholder="🔍 ค้นหา NOTAM, ICAO..."
+            style={{
+              width:"100%", background:"#020817",
+              border:"1px solid var(--border-panel)", borderRadius:8,
+              padding:"6px 12px", color:"var(--text-primary)",
+              fontSize:12, outline:"none", boxSizing:"border-box"
+            }}
+          />
+        </div>
+        <span style={{ fontSize:12, color:"var(--text-secondary)", fontWeight:700, whiteSpace:"nowrap" }}>
+          พบ {filtered.length} รายการ
+        </span>
       </div>
 
-      {/* Priority + Search */}
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-        {["ALL","HIGH","MED","LOW"].map(p=>(
-          <button key={p} onClick={()=>setPrio(p)} style={{padding:"5px 12px",fontSize:14,borderRadius:6,border:`1px solid ${prio===p?(PC[p]||"#38bdf8"):"#1e3a5f"}`,background:prio===p?(PC[p]||"#38bdf8")+"22":"transparent",color:prio===p?(PC[p]||"#38bdf8"):"var(--text-secondary)",cursor:"pointer",fontWeight:700}}>
-            {p==="ALL"?"ทุกระดับ":PL[p]}
-          </button>
-        ))}
-        <div style={{flex:1,minWidth:150}}>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 ค้นหา NOTAM, ICAO..."
-            style={{width:"100%",background:"#020817",border:"1px solid #1e3a5f",borderRadius:8,padding:"5px 12px",color:"#e2e8f0",fontSize:15,outline:"none",boxSizing:"border-box"}}/>
+      {/* ── 5. NOTAM CARDS BY PRIORITY ── */}
+      {filtered.length === 0 && (
+        <div style={{ textAlign:"center", padding:48, color:"var(--text-secondary)", fontSize:15 }}>
+          ไม่พบ NOTAM ที่ตรงกับเงื่อนไขที่เลือก
         </div>
-        <span style={{fontSize:14,color:"#38bdf8"}}>พบ {allNtms.length} รายการ</span>
-        {totalHigh>0&&<span style={{fontSize:14,color:"#ef4444",fontWeight:700}}>⚠ HIGH: {totalHigh}</span>}
-      </div>
-    </div>
+      )}
 
-    {sel.length===0&&<div style={{textAlign:"center",padding:"50px",color:"var(--text-secondary)"}}>กรุณาเลือกสนามบิน</div>}
-    {sel.length>0&&allNtms.length===0&&<div style={{textAlign:"center",padding:"50px",color:"var(--text-secondary)"}}>✅ ไม่พบ NOTAM ที่ตรงเงื่อนไข</div>}
+      {PRI_ORDER.filter(pk => byPri[pk].length > 0).map(pk => {
+        const rows = byPri[pk];
+        const pi = getPri(rows[0].Priority);
 
-    {/* LIST VIEW */}
-    {view==="list" && allNtms.map(n=>(
-      <div key={n.id+n.icao} onClick={()=>setExp(exp===n.id+n.icao?null:n.id+n.icao)}
-        style={{border:`1px solid ${PC[n.p]}44`,borderRadius:12,marginBottom:10,background:`${PC[n.p]}06`,cursor:"pointer",borderLeft:`3px solid ${PC[n.p]}`}}>
-        <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 18px",flexWrap:"wrap"}}>
-          <span style={{fontSize:12,padding:"2px 10px",borderRadius:5,background:PC[n.p]+"30",color:PC[n.p],fontWeight:800,minWidth:52,textAlign:"center"}}>{n.p}</span>
-          <span style={{fontFamily:"monospace",fontWeight:900,color:"#38bdf8",fontSize:16}}>{n.id}</span>
-          <span style={{fontSize:14,padding:"1px 9px",borderRadius:5,background:(BC[n.branch]||"var(--text-secondary)")+"22",color:BC[n.branch]||"var(--text-secondary)",fontWeight:700}}>{n.icao}</span>
-          <span style={{fontSize:12,color:"var(--text-secondary)"}}>{n.apName}</span>
-          <span style={{fontSize:12,padding:"1px 8px",borderRadius:3,background:"#a78bfa22",color:"#a78bfa"}}>{n.t}</span>
-          <div style={{flex:1}}/>
-          <span style={{color:"#334155",fontSize:15}}>{exp===n.id+n.icao?"▲":"▼"}</span>
-        </div>
-        <div style={{borderTop:`1px solid ${PC[n.p]}22`,padding:"12px 18px 15px"}}>
-          <pre style={{margin:0,fontFamily:"'Courier New',monospace",fontSize:15,color:"var(--text-primary)",whiteSpace:"pre-wrap",wordBreak:"break-word",lineHeight:2}}>{n.raw}</pre>
-        </div>
-      </div>
-    ))}
+        /* sub-group by Section_No + Section_Name */
+        const subGroups: Record<string, any[]> = {};
+        rows.forEach(r => {
+          const sg = [r.Section_No, r.Section_Name].filter(Boolean).join(". ") || "ทั่วไป";
+          if (!subGroups[sg]) subGroups[sg] = [];
+          subGroups[sg].push(r);
+        });
 
-    {/* AIRPORT VIEW */}
-    {view==="airport" && (
-      <div style={{display:"flex",flexDirection:"column",gap:18}}>
-        {sel.filter(icao=>(activeNotams[icao]||[]).length>0).map(icao=>{
-          const ap=AIRPORTS.find(a=>a.icao===icao);
-          const bc=BC[ap?.branch]||"var(--text-secondary)";
-          const ntms=(activeNotams[icao]||[]).filter(n=>{
-            if(prio!=="ALL"&&n.p!==prio) return false;
-            if(seriesFilter==="BLACK"&&n.id.startsWith("J")) return false;
-            if(seriesFilter==="BLUE"&&!n.id.startsWith("J")) return false;
-            if(search&&!n.raw.toUpperCase().includes(search.toUpperCase())) return false;
-            return true;
-          });
-          if(ntms.length===0) return null;
-          return <div key={icao} style={{background:"#0a1120",border:`1px solid ${bc}44`,borderRadius:12}}>
-            <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 20px",borderBottom:`1px solid ${bc}33`,background:bc+"10",borderRadius:"10px 10px 0 0"}}>
-              <span style={{fontFamily:"monospace",fontWeight:900,fontSize:20,color:bc}}>{icao}</span>
-              <span style={{fontSize:14,color:"var(--text-secondary)",flex:1}}>{ap?.name}</span>
-              <span style={{fontSize:12,padding:"2px 10px",borderRadius:5,background:bc+"22",color:bc,fontWeight:700}}>{ap?.branch}</span>
-              <span style={{fontSize:12,color:"#334155"}}>{ntms.length} NOTAM</span>
+        return (
+          <div key={pk} style={{
+            border:`1px solid ${pi.border}44`,
+            borderRadius:14,
+            overflow:"hidden"
+          }}>
+            {/* Priority Group Banner */}
+            <div style={{
+              background: pi.bg,
+              borderBottom:`1px solid ${pi.border}44`,
+              padding:"10px 16px",
+              display:"flex", alignItems:"center", gap:10
+            }}>
+              <span style={{ fontSize:15, fontWeight:900, color:pi.color }}>
+                {pi.emoji} {pi.label}
+              </span>
+              <span style={{
+                background:pi.border, color:"#fff",
+                borderRadius:10, padding:"0 8px",
+                fontSize:11, fontWeight:900
+              }}>{rows.length}</span>
             </div>
-            {ntms.map((n,i)=>(
-              <div key={n.id} style={{padding:"15px 20px",borderBottom:i<ntms.length-1?"1px solid #0f172a":"none",borderLeft:`3px solid ${PC[n.p]}`}}>
-                <div style={{display:"flex",gap:10,marginBottom:8}}>
-                  <span style={{fontSize:12,padding:"1px 9px",borderRadius:5,background:PC[n.p]+"30",color:PC[n.p],fontWeight:800}}>{n.p}</span>
-                  <span style={{fontSize:12,padding:"1px 8px",borderRadius:3,background:"#a78bfa22",color:"#a78bfa"}}>{n.t}</span>
+
+            {/* Sub-groups */}
+            {Object.entries(subGroups).map(([secName, secRows]) => (
+              <div key={secName} style={{ borderBottom:`1px solid ${pi.border}18` }}>
+                {/* Sub-group header */}
+                <div style={{
+                  background:"rgba(255,255,255,0.025)",
+                  borderBottom:`1px solid var(--border-panel)`,
+                  padding:"7px 16px",
+                  display:"flex", alignItems:"center", gap:8
+                }}>
+                  <span style={{ fontSize:12, fontWeight:800, color:"var(--text-primary)" }}>
+                    {secName}
+                  </span>
+                  <span style={{ fontSize:11, color:"var(--text-secondary)" }}>({secRows.length})</span>
                 </div>
-                <pre style={{margin:0,fontFamily:"'Courier New',monospace",fontSize:15,color:"var(--text-primary)",whiteSpace:"pre-wrap",wordBreak:"break-word",lineHeight:2}}>{n.raw}</pre>
+
+                {/* NOTAM Cards */}
+                {secRows.map((r: any, idx: number) => {
+                  const cardId = `${pk}-${secName}-${idx}`;
+                  const isExp  = expandedIds.has(cardId);
+                  const rawTxt = (r.Raw_Text || "").trim();
+                  const isPerm = (r.C_End_UTC||"").toUpperCase().includes("PERM");
+                  const aLine  = (r.A_Line||"").trim();
+
+                  return (
+                    <div key={cardId} style={{
+                      background:"var(--bg-card)",
+                      borderBottom:`1px solid ${pi.border}12`,
+                      padding:"14px 16px"
+                    }}>
+                      {/* Card header row */}
+                      <div style={{
+                        display:"flex", alignItems:"center",
+                        flexWrap:"wrap", gap:7, marginBottom:10
+                      }}>
+                        {/* Priority badge */}
+                        <span style={{
+                          background:pi.bg, border:`1px solid ${pi.border}55`,
+                          color:pi.color, borderRadius:6, padding:"2px 8px",
+                          fontSize:11, fontWeight:800
+                        }}>{pi.emoji} {pi.label}</span>
+
+                        {/* Active badge */}
+                        <span style={{
+                          background:"rgba(34,197,94,0.1)",
+                          border:"1px solid rgba(34,197,94,0.3)",
+                          color:"#22c55e", borderRadius:6, padding:"2px 8px",
+                          fontSize:10, fontWeight:800
+                        }}>● มีผลอยู่ (ACTIVE)</span>
+
+                        {/* NOTAM ID */}
+                        <span style={{
+                          fontFamily:"'JetBrains Mono','Courier New',monospace",
+                          fontWeight:900, fontSize:14, color:"#38bdf8"
+                        }}>{r.NOTAM_ID}</span>
+
+                        {/* Airport */}
+                        {aLine && (
+                          <span style={{
+                            fontWeight:800, fontSize:13, color:"var(--text-primary)"
+                          }}>{aLine}</span>
+                        )}
+
+                        {/* Location name / Q line */}
+                        {r.Q_Line && (
+                          <span style={{ fontSize:11, color:"var(--text-secondary)" }}>
+                            {r.Q_Line}
+                          </span>
+                        )}
+
+                        {/* Section tag */}
+                        <span style={{
+                          marginLeft:"auto", fontSize:11,
+                          color:"var(--text-secondary)", fontStyle:"italic"
+                        }}>{secName}</span>
+                      </div>
+
+                      {/* Start / End UTC */}
+                      <div style={{
+                        display:"grid", gridTemplateColumns:"1fr 1fr",
+                        gap:10, marginBottom:12
+                      }}>
+                        {[
+                          { label:"🗓 เริ่มต้น (START UTC)", val: r.B_Start_UTC || "-" },
+                          { label:"🗓 สิ้นสุด (END UTC)",   val: isPerm ? "ปกร (PERM)" : (r.C_End_UTC||"-") }
+                        ].map(({label,val})=>(
+                          <div key={label} style={{
+                            background:"rgba(255,255,255,0.03)",
+                            border:"1px solid var(--border-panel)",
+                            borderRadius:8, padding:"7px 12px"
+                          }}>
+                            <div style={{ fontSize:10, color:"var(--text-secondary)", fontWeight:700, marginBottom:3 }}>{label}</div>
+                            <div style={{
+                              fontSize:12, fontFamily:"'JetBrains Mono',monospace",
+                              color: isPerm && label.includes("สิ้นสุด") ? "#f97316" : "var(--text-primary)",
+                              fontWeight:700
+                            }}>{val}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* RAW TEXT block */}
+                      {rawTxt && (
+                        <div style={{
+                          background:"rgba(0,0,0,0.28)",
+                          border:`1px solid ${pi.border}33`,
+                          borderRadius:9, padding:"11px 13px",
+                          fontFamily:"'JetBrains Mono','Courier New',monospace",
+                          fontSize:12.5, color:"var(--text-primary)",
+                          lineHeight:1.75,
+                          whiteSpace:"pre-wrap", wordBreak:"break-word",
+                          maxHeight: isExp ? "none" : rawMode ? "none" : "180px",
+                          overflow: (isExp || rawMode) ? "visible" : "hidden"
+                        }}>{rawTxt}</div>
+                      )}
+
+                      {/* Toggle expand */}
+                      {rawTxt && !rawMode && (
+                        <div style={{ textAlign:"right", marginTop:6 }}>
+                          <button
+                            onClick={()=>toggleExpand(cardId)}
+                            style={{
+                              background:"transparent", border:"none",
+                              color:"#38bdf8", cursor:"pointer",
+                              fontSize:11, fontWeight:700
+                            }}>
+                            {isExp ? "▲ ย่อ RAW TEXT" : "▼ แสดง RAW TEXT"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ))}
-          </div>;
-        })}
-      </div>
-    )}
-  </div>;
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
-// ── Flight Tab ──────────────────────────────────────────────────────────────────
-const EMPTY_FLIGHT = {day:"FRI",date:"",acTypeF:"S-70i",mission:"",ac:"",cs:"",pilot:"",coPilot:"",takeoff:"",land:"",route:"",remark:"",sq:""};
-const AC_NUMBERS = {"S-92A":["129","131","133","286","298"],"S-70i":["040","056","060","103","104"]};
-const DAYS = ["MON","TUE","WED","THU","FRI","SAT","SUN"];
-const DC   = {MON:"#3b82f6",TUE:"#3b82f6",WED:"#22c55e",THU:"#f97316",FRI:"#3b82f6",SAT:"#a855f7",SUN:"#ef4444"};
-const COLS = [{k:"day",l:"DAY",w:48},{k:"date",l:"DATE",w:58},{k:"acTypeF",l:"TYPE",w:55},{k:"mission",l:"MISSION",w:105},{k:"ac",l:"A/C",w:40},{k:"cs",l:"Callsign",w:80},{k:"pilot",l:"Pilot",w:62},{k:"coPilot",l:"CO-PILOT",w:68},{k:"takeoff",l:"T/O",w:48},{k:"land",l:"L/D",w:48},{k:"route",l:"ROUTE",w:90},{k:"remark",l:"REMARK",w:90},{k:"sq",l:"SQ.",w:42},];
 
 function sortFlights(list: any[]) {
   const parseTime = (t: any) => {
@@ -1408,6 +1766,230 @@ function CallsignComboBox({ value, onChange, ac, dark=true, inp }) {
   );
 }
 
+const EMPTY_FLIGHT = {
+  day: "MON",
+  date: "",
+  acTypeF: "S-70i",
+  mission: "",
+  ac: "",
+  cs: "",
+  pilot: "",
+  coPilot: "",
+  takeoff: "",
+  land: "",
+  route: "",
+  altitude: "",
+  fuel: "",
+  remark: "",
+  sq: ""
+};
+
+const AC_NUMBERS = {
+  "S-92A": ["129", "131", "133", "286", "298"],
+  "S-70i": ["040", "056", "060", "103", "104"]
+};
+
+const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+
+// Index 0 = Sunday … 6 = Saturday  (matches JS Date.getDay())
+const DAY_EN_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_EN_FULL  = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+const DC: Record<string, string> = {
+  "วันจันทร์": "#eab308",
+  "วันอังคาร": "#ec4899",
+  "วันพุธ": "#22c55e",
+  "วันพฤหัสบดี": "#f97316",
+  "วันศุกร์": "#06b6d4",
+  "วันเสาร์": "#a855f7",
+  "วันอาทิตย์": "#ef4444",
+  "Monday": "#eab308",
+  "Tuesday": "#ec4899",
+  "Wednesday": "#22c55e",
+  "Thursday": "#f97316",
+  "Friday": "#06b6d4",
+  "Saturday": "#a855f7",
+  "Sunday": "#ef4444",
+  "Mon": "#eab308",
+  "Tue": "#ec4899",
+  "Wed": "#22c55e",
+  "Thu": "#f97316",
+  "Fri": "#06b6d4",
+  "Sat": "#a855f7",
+  "Sun": "#ef4444",
+  "MON": "#eab308",
+  "TUE": "#ec4899",
+  "WED": "#22c55e",
+  "THU": "#f97316",
+  "FRI": "#06b6d4",
+  "SAT": "#a855f7",
+  "SUN": "#ef4444"
+};
+
+const COLS = [
+  { k: "day",      l: "DAY",       w: 38 },
+  { k: "date",     l: "DATE",      w: 50 },
+  { k: "acTypeF",  l: "TYPE",      w: 48 },
+  { k: "mission",  l: "MISSION",   w: 80 },
+  { k: "ac",       l: "A/C",       w: 32 },
+  { k: "cs",       l: "C/S",       w: 62 },
+  { k: "pilot",    l: "PILOT",     w: 55 },
+  { k: "coPilot",  l: "CO-PILOT",  w: 55 },
+  { k: "takeoff",  l: "T/O",       w: 38 },
+  { k: "land",     l: "L/D",       w: 38 },
+  { k: "route",    l: "ROUTE",     w: 72 },
+  { k: "altitude", l: "ALT",       w: 48 },
+  { k: "fuel",     l: "FUEL",      w: 40 },
+  { k: "remark",   l: "REMARK",    w: 82 },
+  { k: "sq",       l: "SQ.",       w: 32 }
+];
+
+function formatMissionText(val: string, align: "center" | "left" = "center") {
+  if (!val) return "";
+  const match = val.match(/^(พ\.[0-9\-]+)(.*)$/i);
+  if (match) {
+    const line1 = match[1].trim();
+    const line2 = match[2].trim();
+    if (line2) {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: align === "center" ? "center" : "flex-start", lineHeight: 1.2 }}>
+          <span style={{ fontWeight: 800 }}>{line1}</span>
+          <span style={{ fontSize: "0.9em", opacity: 0.8 }}>{line2}</span>
+        </div>
+      );
+    }
+  }
+  return <span style={{ fontWeight: 800 }}>{val}</span>;
+}
+
+function formatRouteText(route: string) {
+  if (!route) return "";
+  const parts = route.split("-").map(s => s.trim()).filter(Boolean);
+  if (parts.length <= 2) return route;
+  
+  const lines: string[] = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    const chunk = parts.slice(i, i + 2);
+    const suffix = (i + 2 < parts.length) ? "-" : "";
+    lines.push(chunk.join("-") + suffix);
+  }
+  
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.2 }}>
+      {lines.map((line, idx) => (
+        <span key={idx} style={{ whiteSpace: "nowrap" }}>{line}</span>
+      ))}
+    </div>
+  );
+}
+
+function mapRowToFlight(r: any[]) {
+  const ENG_DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+  const THAI_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+
+  let dateStr = "";
+  let dayStr = "";
+  
+  const parseDateStrHelper = (s: string): Date | null => {
+    if (!s) return null;
+    const clean = s.replace(/^[ก-๙a-zA-Z\s]+,\s*/, "").trim();
+    const p = clean.split(/\s+/);
+    if (p.length < 2) return null;
+    const dVal = parseInt(p[0]);
+    if (isNaN(dVal)) return null;
+
+    let mIdx = MONTH_EN.findIndex(x => x.toLowerCase() === p[1].toLowerCase());
+    if (mIdx < 0) {
+      mIdx = THAI_MONTHS.findIndex(x => x.toLowerCase() === p[1].toLowerCase() || x.replace(/\./g, "") === p[1].replace(/\./g, ""));
+    }
+    if (mIdx < 0) return null;
+
+    let yVal = p[2] ? parseInt(p[2]) : new Date().getFullYear();
+    if (!isNaN(yVal) && yVal > 2500) {
+      yVal -= 543;
+    }
+    return new Date(yVal, mIdx, dVal);
+  };
+
+  if (r[0]) {
+    try {
+      let d = new Date(r[0]);
+      if (isNaN(d.getTime())) {
+        const parsed = parseDateStrHelper(r[0]);
+        if (parsed) d = parsed;
+      }
+      if (!isNaN(d.getTime())) {
+        dateStr = `${d.getDate()} ${MONTH_EN[d.getMonth()]} ${d.getFullYear()}`.toUpperCase();
+        dayStr = ENG_DAYS[d.getDay()];
+      } else {
+        dateStr = String(r[0]).toUpperCase();
+      }
+    } catch (e) {
+      dateStr = String(r[0]).toUpperCase();
+    }
+  }
+
+  const parseTimeStr = (val: any) => {
+    if (!val) return "";
+    const str = String(val);
+    if (str.includes("T")) {
+      const d = new Date(str);
+      if (!isNaN(d.getTime())) {
+        const hrs = String(d.getHours()).padStart(2, "0");
+        const mins = String(d.getMinutes()).padStart(2, "0");
+        return `${hrs}:${mins}`;
+      }
+    }
+    const m = str.match(/(\d{1,2}):(\d{2})/);
+    if (m) {
+      return `${m[1].padStart(2, "0")}:${m[2]}`;
+    }
+    return str;
+  };
+
+  const takeoff = parseTimeStr(r[3]);
+  const land = parseTimeStr(r[4]);
+
+  const routeParts = [r[10], r[11], r[12], r[13]]
+    .filter(v => v && String(v).trim() !== "")
+    .map(v => String(v).trim());
+  const route = routeParts.join("-");
+
+  return {
+    day: dayStr || "",
+    date: dateStr || "",
+    acTypeF: r[1] || "",
+    mission: r[2] || "",
+    ac: r[5] || "",
+    cs: r[8] || "",
+    pilot: r[6] || "",
+    coPilot: r[7] || "",
+    takeoff,
+    land,
+    route,
+    altitude: r[14] || "",
+    fuel: r[15] || "",
+    remark: r[18] || "",
+    sq: r[9] || "",
+    _raw: r
+  };
+}
+
+function useIsMobile() {
+  const [isM, setIsM] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth < 768;
+  });
+  useEffect(() => {
+    const handleResize = () => {
+      setIsM(window.innerWidth < 768);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+  return isM;
+}
+
 function FlightForm({init, onSave, onCancel, onDateChange=null}) {
   const [f, setF] = useState(init || EMPTY_FLIGHT);
   const [pilots, setPilots] = useState([]);
@@ -1513,39 +2095,138 @@ function FlightForm({init, onSave, onCancel, onDateChange=null}) {
 }
 
 function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)=>void}) {
-  const [flights,  setFlights]  = useState([]);
-  const [ready,    setReady]    = useState(false); // พร้อมแสดงผล
+  const isMobile = useIsMobile();
+  const [flights,  setFlights]  = useState(() => {
+    try {
+      const cached = localStorage.getItem("cached_flights_201");
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [ready,    setReady]    = useState(() => {
+    try {
+      const cached = localStorage.getItem("cached_flights_201");
+      return !!cached;
+    } catch {
+      return false;
+    }
+  });
   const [mode,     setMode]     = useState(null);
   const [delIdx,   setDelIdx]   = useState(null);
   const [toast,    setToast]    = useState(null);
   const [syncing,  setSyncing]  = useState(false);
   const [expandedRow, setExpandedRow] = useState<number|null>(null);
 
+  const [loadError,   setLoadError]   = useState<string|null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+
   // โหลดข้อมูลจาก Sheet เมื่อเปิด
   useEffect(() => {
-    loadFromSheet("FLIGHT SCHEDULE").then(rows => {
+    setLoadError(null);
+    loadFromSheet("Flight Schedule 201").then(rows => {
+      console.log("[FlightTab] rows from sheet:", rows.length);
       if (rows.length > 1) {
         const [, ...data] = rows;
-        const loadedData = data.map(r => ({
-          day:r[0]||"",date:r[1]||"",acTypeF:r[2]||"",mission:r[3]||"",ac:r[4]||"",
-          cs:r[5]||"",pilot:r[6]||"",coPilot:r[7]||"",takeoff:r[8]||"",
-          land:r[9]||"",route:r[10]||"",remark:r[11]||"",sq:r[12]||""
-        }));
-        setFlights(loadedData.length > 0 ? loadedData : []);
+        const loadedData = data
+          .filter(r => Array.isArray(r) && r.some(v => v !== "" && v != null))
+          .map(mapRowToFlight);
+        console.log("[FlightTab] mapped flights:", loadedData.length, loadedData.slice(0,3));
+        if (loadedData.length > 0) {
+          setFlights(loadedData);
+          localStorage.setItem("cached_flights_201", JSON.stringify(loadedData));
+        } else {
+          setLoadError("โหลดข้อมูลได้ " + rows.length + " แถว แต่ map ไม่ได้ข้อมูล");
+        }
+      } else if (rows.length === 0) {
+        setLoadError("ไม่ได้รับข้อมูลจาก Google Sheets (rows = 0)");
+      } else {
+        setLoadError("ได้รับเพียง header row (rows = 1) ไม่มีข้อมูลบิน");
       }
-    }).catch(()=>{
-    }).finally(()=>{
+    }).catch((err) => {
+      console.error("[FlightTab] load error:", err);
+      setLoadError("โหลดข้อมูลล้มเหลว: " + (err?.message || String(err)));
+    }).finally(() => {
       setReady(true);
     });
-  }, []);
+  }, [loadAttempt]);
+
 
   const saveFlightsToSheet = (updatedFlights) => {
     setSyncing(true);
-    const rows = [
-      ["day","date","acTypeF","mission","ac","cs","pilot","coPilot","takeoff","land","route","remark","sq"],
-      ...updatedFlights.map(f=>[f.day,f.date,f.acTypeF||"",f.mission,f.ac,f.cs,f.pilot,f.coPilot,f.takeoff,f.land,f.route,f.remark,f.sq])
+    const headerRow = [
+      'DATE', 'Type', 'MISSION', 'T/O', 'L/D', 'A/C', 'PILOT', 'CO-PILOT', 'C/S', 'SQ.',
+      'DEPART', 'DEST1', 'DEST2', 'DEST3', 'ALTITUDE', 'FUEL', 'Planned Flight time', 'Flight time',
+      'REMARK', 'ประเภทการบิน', 'Refuel (Liter)', 'Condition', 'AREA/ROUTE', 'Postflight Remark',
+      'Edited By', 'DAY NUM\n', 'เที่ยวบินฝึกบิน', 'ชม.ฝึกบิน', 'เที่ยวบินภารกิจ', 'ชม.ภารกิจ',
+      'เที่ยวบินทดสอบ', 'ชม.บินทดสอบ', 'เที่ยวบินละภารกิจ'
     ];
-    saveToSheet("FLIGHT SCHEDULE", rows).finally(()=>setSyncing(false));
+    const rows = [
+      headerRow,
+      ...updatedFlights.map(f => {
+        const base = Array.isArray(f._raw) ? [...f._raw] : Array(33).fill("");
+        
+        if (f.date) {
+          const clean = f.date.replace(/^[ก-๙a-zA-Z\s]+,\s*/, "").trim();
+          const p = clean.split(/\s+/);
+          if (p.length >= 2) {
+            const dVal = parseInt(p[0]);
+            const mIdx = MONTH_EN.findIndex(x => x.toLowerCase() === p[1].toLowerCase());
+            if (!isNaN(dVal) && mIdx >= 0) {
+              let yVal = p[2] ? parseInt(p[2]) : new Date().getFullYear();
+              if (yVal > 2500) yVal -= 543;
+              const dObj = new Date(yVal, mIdx, dVal);
+              dObj.setUTCHours(17, 0, 0, 0);
+              base[0] = dObj.toISOString();
+            } else {
+              base[0] = f.date;
+            }
+          } else {
+            base[0] = f.date;
+          }
+        } else {
+          base[0] = "";
+        }
+
+        base[1] = f.acTypeF || "";
+        base[2] = f.mission || "";
+
+        const formatTime = (timeStr: string) => {
+          if (!timeStr) return "";
+          const p = timeStr.split(":");
+          if (p.length === 2) {
+            const h = parseInt(p[0]);
+            const m = parseInt(p[1]);
+            const td = new Date(1899, 11, 30, h, m, 56);
+            return td.toISOString();
+          }
+          return timeStr;
+        };
+
+        base[3] = formatTime(f.takeoff);
+        base[4] = formatTime(f.land);
+        base[5] = f.ac || "";
+        base[6] = f.pilot || "";
+        base[7] = f.coPilot || "";
+        base[8] = f.cs || "";
+        base[9] = f.sq || "";
+
+        const airports = f.route ? f.route.split("-").map(a => a.trim()) : [];
+        base[10] = airports[0] || "";
+        base[11] = airports[1] || "";
+        base[12] = airports[2] || "";
+        base[13] = airports[3] || "";
+
+        base[14] = f.altitude || "";
+        base[15] = f.fuel || "";
+
+        base[18] = f.remark || "";
+
+        while (base.length < 33) base.push("");
+        return base;
+      })
+    ];
+    saveToSheet("Flight Schedule 201", rows).finally(()=>setSyncing(false));
   };
 
   const showToast = (msg, color="#22c55e") => {
@@ -1584,15 +2265,17 @@ function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)
   const [focusDay,  setFocusDay] = useState<Date|null>(null); // วันที่ focus ใน weekly
 
   // helpers
-  const fmtDate2 = (d:Date) => `${d.getDate()} ${MONTH_EN[d.getMonth()]}`;
+  const fmtDate2 = (d:Date) => `${d.getDate()} ${MONTH_EN[d.getMonth()]} ${d.getFullYear()}`.toUpperCase();
   const parseDateStr = (s:string):Date|null => {
     if (!s) return null;
-    const p = s.trim().split(" ");
+    const clean = s.replace(/^[ก-๙a-zA-Z\s]+,\s*/, "").trim();
+    const p = clean.split(/\s+/);
     if (p.length < 2) return null;
     const d = parseInt(p[0]);
     const m = MONTH_EN.findIndex(x=>x.toLowerCase()===p[1].toLowerCase());
     if (isNaN(d)||m<0) return null;
-    return new Date(new Date().getFullYear(), m, d);
+    const y = p[2] ? parseInt(p[2]) : new Date().getFullYear();
+    return new Date(y, m, d);
   };
   const sameDay = (a:Date|null,b:Date|null) => a&&b&&a.getDate()===b.getDate()&&a.getMonth()===b.getMonth()&&a.getFullYear()===b.getFullYear();
   const getWeekMon = (base:Date) => { const d=new Date(base); const dow=d.getDay(); d.setDate(d.getDate()-(dow===0?6:dow-1)); return d; };
@@ -1613,7 +2296,7 @@ function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)
   const tabBtn = (id:string,label:string) => (
     <button key={id} onClick={()=>setView(id as any)}
       style={{padding:"8px 20px",borderRadius:8,border:"none",cursor:"pointer",fontWeight:700,fontSize:15,
-        background:view===id?"#7c3aed":"transparent",color:view===id?"#fff":"var(--text-secondary)",
+        background:view===id?"var(--accent-color)":"transparent",color:view===id?"#fff":"var(--text-secondary)",
         boxShadow:view===id?"0 1px 4px #0003":"none",transition:"all 0.15s"}}>
       {label}
     </button>
@@ -1625,282 +2308,256 @@ function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)
     const isExpanded=expandedRow===realIdx;
     const colSpan=COLS.length+1; // +1 for expand col
     const sf="'Sarabun','IBM Plex Sans Thai',sans-serif";
+    const rowBg = isExpanded 
+      ? "var(--row-bg-expanded)"
+      : isEditing 
+      ? "var(--row-bg-editing)"
+      : rowIdx%2===0 
+      ? "transparent" 
+      : "var(--row-bg-even)";
+    
     return (
-      <>
-        <tr key={rowIdx}
+      <Fragment key={rowIdx}>
+        <tr
           onClick={()=>setExpandedRow(isExpanded?null:realIdx)}
-          style={{borderBottom:isExpanded?"none":"1px solid #e2e8f0",background:isExpanded?"#f0f4ff":isEditing?"#eff6ff":rowIdx%2===0?"#fff":"#f9fafb",cursor:"pointer",transition:"background 0.15s",fontFamily:sf,fontWeight:400}}>
+          style={{borderBottom:isExpanded?"none":"1px solid var(--border-panel)",background:rowBg,cursor:"pointer",transition:"background 0.15s",fontFamily:sf,fontWeight:500}}>
           <td style={{padding:0,width:0,border:"none"}}></td>
-          <td style={{padding:"12px 10px",textAlign:"center"}}><span style={{background:dc,color:"#fff",fontWeight:800,fontSize:14,padding:"3px 10px",borderRadius:5}}>{f.day}</span></td>
-          <td style={{padding:"12px 10px",textAlign:"center",color:"#111"}}>{f.date}</td>
-          <td style={{padding:"12px 10px",textAlign:"center"}}>
-            <span style={{background:f.acTypeF==="S-92A"?"#d1fae5":"#e0f2fe",color:f.acTypeF==="S-92A"?"#065f46":"#0369a1",fontWeight:700,fontSize:14,padding:"2px 9px",borderRadius:5}}>{f.acTypeF||"—"}</span>
+          <td style={{padding:"8px 5px",textAlign:"center"}}><span style={{background:dc,color:"#fff",fontWeight:800,fontSize:11,padding:"2px 6px",borderRadius:5}}>{f.day}</span></td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)"}}>{f.date ? f.date.split(" ").slice(0, 2).join(" ") : ""}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",whiteSpace:"nowrap"}}>
+            <span style={{background:f.acTypeF==="S-92A"?"rgba(16,185,129,0.15)":"rgba(56,189,248,0.15)",color:f.acTypeF==="S-92A"?"#10b981":"#38bdf8",fontWeight:700,fontSize:11,padding:"1px 6px",borderRadius:5}}>{f.acTypeF||"—"}</span>
           </td>
-          <td style={{padding:"12px 10px",textAlign:"center",color:"#111"}}>{f.mission}</td>
-          <td style={{padding:"12px 10px",textAlign:"center",color:"#111"}}>{f.ac}</td>
-          <td style={{padding:"12px 10px",textAlign:"center",color:"#111"}}>{f.cs}</td>
-          <td style={{padding:"12px 10px",textAlign:"center",color:"#111"}}>{f.pilot}</td>
-          <td style={{padding:"12px 10px",textAlign:"center",color:"#111"}}>{f.coPilot}</td>
-          <td style={{padding:"12px 10px",textAlign:"center",color:"#111"}}>{f.takeoff}</td>
-          <td style={{padding:"12px 10px",textAlign:"center",color:"#111"}}>{f.land}</td>
-          <td style={{padding:"12px 10px",textAlign:"center",fontSize:15,color:"#111"}}>{f.route}</td>
-          <td style={{padding:"12px 10px",textAlign:"center",fontSize:15,color:"#111"}}>{f.remark}</td>
-          <td style={{padding:"12px 10px",textAlign:"center",color:"#111"}}>{f.sq}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)"}}>{formatMissionText(f.mission, "center")}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)"}}>{f.ac}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)"}}>{f.cs}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)",fontWeight:800,whiteSpace:"nowrap"}}>{f.pilot}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)",whiteSpace:"nowrap"}}>{f.coPilot}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"#06b6d4",fontFamily:"monospace",fontWeight:800}}>{f.takeoff}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"#a78bfa",fontFamily:"monospace",fontWeight:800}}>{f.land}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)"}}>{formatRouteText(f.route)}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)"}}>{f.altitude}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)"}}>{f.fuel}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)",wordBreak:"break-word",lineHeight:1.2}}>{f.remark}</td>
+          <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)"}}>{f.sq}</td>
         </tr>
         {isExpanded&&(
-          <tr style={{background:"#eef2ff",borderBottom:"2px solid #7c3aed"}}>
+          <tr className="expand-row" style={{background:"var(--expand-panel-bg)",borderBottom:"2px solid #7c3aed"}}>
             <td colSpan={colSpan} style={{padding:"12px 20px"}}>
               <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-                <span style={{fontSize:14,fontWeight:700,color:"#6d28d9",marginRight:5}}>🛡️ SAFETY</span>
+                <span style={{fontSize:14,fontWeight:800,color:"var(--expand-panel-title)",marginRight:5}}>🛡️ SAFETY</span>
                 {onOpenSafety&&<>
                   <button onClick={e=>{e.stopPropagation();onOpenSafety("risk",f);}}
-                    style={{padding:"6px 15px",fontSize:14,borderRadius:8,border:"1px solid #f97316",background:"#fff7ed",color:"#c2410c",cursor:"pointer",fontWeight:700}}>
+                    style={{padding:"6px 15px",fontSize:14,borderRadius:8,border:"1px solid #f97316",background:"var(--expand-panel-btn-risk-bg)",color:"#f97316",cursor:"pointer",fontWeight:700}}>
                     ⚠️ Risk
                   </button>
                   <button onClick={e=>{e.stopPropagation();onOpenSafety("hazard",f);}}
-                    style={{padding:"6px 15px",fontSize:14,borderRadius:8,border:"1px solid #dc2626",background:"#fef2f2",color:"#b91c1c",cursor:"pointer",fontWeight:700}}>
+                    style={{padding:"6px 15px",fontSize:14,borderRadius:8,border:"1px solid #dc2626",background:"var(--expand-panel-btn-hazard-bg)",color:"#f87171",cursor:"pointer",fontWeight:700}}>
                     🚨 Hazard
                   </button>
                 </>}
-                <span style={{fontSize:14,fontWeight:700,color:"#374151",margin:"0 4px"}}>|</span>
-                <span style={{fontSize:14,fontWeight:700,color:"#374151",marginRight:5}}>จัดการ</span>
+                <span style={{fontSize:14,fontWeight:700,color:"var(--text-secondary)",margin:"0 4px"}}>|</span>
+                <span style={{fontSize:14,fontWeight:800,color:"var(--text-primary)",marginRight:5}}>จัดการ</span>
                 <button onClick={e=>{e.stopPropagation();setMode(mode===realIdx?null:realIdx);setExpandedRow(null);}}
                   style={{padding:"6px 15px",fontSize:14,borderRadius:8,border:"1px solid #3b82f6",background:isEditing?"#3b82f6":"#eff6ff",color:isEditing?"#fff":"#2563eb",cursor:"pointer",fontWeight:700}}>
                   {isEditing?"✕ ยกเลิก":"✏️ แก้ไข"}
                 </button>
-                <button onClick={e=>{e.stopPropagation();setDelIdx(realIdx);setExpandedRow(null);}}
-                  style={{padding:"6px 15px",fontSize:14,borderRadius:8,border:"1px solid #ef4444",background:"#fef2f2",color:"#dc2626",cursor:"pointer",fontWeight:700}}>
+                <button onClick={e=>{e.stopPropagation();setDelIdx(realIdx);}}
+                  style={{padding:"6px 15px",fontSize:14,borderRadius:8,border:"1px solid #ef4444",background:"transparent",color:"#ef4444",cursor:"pointer",fontWeight:700}}>
                   🗑 ลบ
                 </button>
               </div>
             </td>
           </tr>
         )}
-      </>
+      </Fragment>
     );
   };
 
-  if (!ready) return (
-    <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8",fontSize:18}}>
-      <div style={{fontSize:40,marginBottom:15,animation:"spin 1s linear infinite"}}>⟳</div>
-      <div>กำลังโหลดข้อมูลจาก Google Sheets...</div>
-    </div>
-  );
+  if (!ready && flights.length === 0) {
+    return (
+      <div style={{textAlign:"center",padding:"50px 0",color:"var(--text-secondary)"}}>
+        <div className="spinner" style={{marginBottom:10}}></div>
+        <div>กำลังดึงตารางบิน Flight Schedule 201...</div>
+      </div>
+    );
+  }
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{background:"linear-gradient(180deg,#4b5563,#374151)",borderRadius:"10px 10px 0 0",padding:"18px 25px",display:"flex",alignItems:"center",gap:15,flexWrap:"wrap"}}>
-        <div style={{width:55,height:55,background:"#6b7280",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"#d1d5db",fontWeight:700,flexShrink:0}}>WING 2</div>
-        <div style={{flex:1,textAlign:"center"}}>
-          <div style={{fontSize:25,fontWeight:900,color:"#fff",fontStyle:"italic",letterSpacing:2}}>WING 2 FLIGHT SCHEDULE</div>
-          {syncing?<span style={{fontSize:12,color:"#86efac"}}>⟳ sync...</span>:<span style={{fontSize:12,color:"#22c55e"}}>● Sheet</span>}
+    <div style={{background:"transparent",position:"relative"}}>
+      {syncing&&<div style={{position:"absolute",top:10,right:10,zIndex:99,background:"rgba(0,0,0,0.6)",padding:"4px 10px",borderRadius:5,fontSize:13,color:"#60a5fa"}}>Syncing...</div>}
+      {toast&&<div style={{position:"fixed",top:20,right:24,zIndex:999,background:toast.color,color:"#fff",padding:"12px 25px",borderRadius:10,fontWeight:700,fontSize:16,boxShadow:"0 4px 12px #0004"}}>{toast.msg}</div>}
+
+      {delIdx!==null&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:"#1e293b",borderRadius:12,padding:24,width:320,textAlign:"center",border:"1px solid #334155"}}>
+            <div style={{fontSize:38,marginBottom:10}}>⚠️</div>
+            <div style={{fontWeight:700,color:"#fff",fontSize:18,marginBottom:10}}>ยืนยันการลบเที่ยวบิน?</div>
+            <div style={{color:"#94a3b8",fontSize:14,marginBottom:20}}>ข้อมูลจะถูกลบออกจากตารางและ Sync ไปยังสเปรดชีตทันที</div>
+            <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+              <button onClick={()=>setDelIdx(null)} style={{padding:"8px 16px",borderRadius:6,border:"1px solid #475569",background:"transparent",color:"#94a3b8",cursor:"pointer"}}>ยกเลิก</button>
+              <button onClick={()=>handleDelete(delIdx)} style={{padding:"8px 20px",borderRadius:6,border:"none",background:"#ef4444",color:"#fff",cursor:"pointer",fontWeight:700}}>ลบเที่ยวบิน</button>
+            </div>
+          </div>
         </div>
-        {/* View tabs */}
-        <div style={{display:"flex",background:"rgba(0,0,0,0.3)",borderRadius:10,padding:3,gap:2}}>
-          {tabBtn("daily","📋 รายวัน")}
-          {tabBtn("weekly","📅 รายสัปดาห์")}
+      )}
+
+      {/* Status bar: load error or flight count */}
+      <div style={{padding:"6px 24px 0",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        {loadError ? (
+          <div style={{
+            background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.35)",
+            borderRadius:8,padding:"6px 14px",fontSize:13,color:"#fca5a5",
+            display:"flex",alignItems:"center",gap:10,flex:1
+          }}>
+            <span>⚠️ {loadError}</span>
+            <button onClick={()=>{ setReady(false); setLoadAttempt(a=>a+1); }}
+              style={{background:"rgba(239,68,68,0.2)",border:"1px solid #ef4444",color:"#fca5a5",
+                borderRadius:6,padding:"3px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>
+              ↻ ลองอีกครั้ง
+            </button>
+          </div>
+        ) : (
+          <div style={{
+            background:"rgba(34,197,94,0.08)",border:"1px solid rgba(34,197,94,0.25)",
+            borderRadius:8,padding:"5px 14px",fontSize:13,color:"#86efac",
+            display:"flex",alignItems:"center",gap:8
+          }}>
+            <span>✓ โหลดข้อมูลสำเร็จ</span>
+            <span style={{color:"#38bdf8",fontWeight:800}}>{flights.length} เที่ยวบิน</span>
+            <button onClick={()=>{ setReady(false); setLoadAttempt(a=>a+1); }}
+              style={{background:"transparent",border:"1px solid rgba(56,189,248,0.3)",color:"#38bdf8",
+                borderRadius:6,padding:"3px 12px",cursor:"pointer",fontSize:12,fontWeight:700,marginLeft:4}}>
+              ↻ รีโหลด
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Header / Filter bar */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"15px 24px 0",flexWrap:"wrap",gap:10}}>
+        <div style={{display:"flex",background:"var(--border-panel)",borderRadius:10,padding:3,gap:2}}>
+          {tabBtn("daily","รายวัน")}
+          {tabBtn("weekly","รายสัปดาห์")}
         </div>
-        <button onClick={()=>setMode("add")} style={{background:"#16a34a",border:"none",color:"#fff",borderRadius:9,padding:"9px 20px",fontSize:16,fontWeight:700,cursor:"pointer",flexShrink:0}}>
-          ＋ เพิ่มการบิน
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {view==="daily"&&(
+            <>
+              <button onClick={()=>{ const d=new Date(selDate); d.setDate(selDate.getDate()-1); setSelDate(d); }}
+                style={{padding:"8px 12px",borderRadius:8,border:"1px solid var(--border-panel)",background:"transparent",color:"var(--text-primary)",cursor:"pointer",fontWeight:700}}>◀</button>
+              <DatePicker value={fmtDate2(selDate)} onChange={v=>{ const p=parseDateStr(v); if(p)setSelDate(p); }} dark={true}/>
+              <button onClick={()=>{ const d=new Date(selDate); d.setDate(selDate.getDate()+1); setSelDate(d); }}
+                style={{padding:"8px 12px",borderRadius:8,border:"1px solid var(--border-panel)",background:"transparent",color:"var(--text-primary)",cursor:"pointer",fontWeight:700}}>▶</button>
+            </>
+          )}
+          {view==="weekly"&&(
+            <>
+              <button onClick={()=>{ const d=new Date(weekBase); d.setDate(weekBase.getDate()-7); setWeekBase(d); setFocusDay(null); }}
+                style={{padding:"8px 12px",borderRadius:8,border:"1px solid var(--border-panel)",background:"transparent",color:"var(--text-primary)",cursor:"pointer",fontWeight:700}}>◀ สัปดาห์ก่อน</button>
+              <span style={{fontSize:15,color:"var(--text-primary)",fontWeight:700,padding:"0 5px"}}>{fmtDate2(wMon)} - {fmtDate2(wSun)}</span>
+              <button onClick={()=>{ const d=new Date(weekBase); d.setDate(weekBase.getDate()+7); setWeekBase(d); setFocusDay(null); }}
+                style={{padding:"8px 12px",borderRadius:8,border:"1px solid var(--border-panel)",background:"transparent",color:"var(--text-primary)",cursor:"pointer",fontWeight:700}}>สัปดาห์ถัดไป ▶</button>
+            </>
+          )}
+        </div>
+        <button onClick={()=>{ setMode("add"); setExpandedRow(null); }}
+          style={{background:"var(--accent-color)",border:"none",color:"#fff",borderRadius:8,padding:"8px 18px",fontSize:15,fontWeight:800,cursor:"pointer"}}>
+          ➕ เพิ่มเที่ยวบิน
         </button>
       </div>
 
-      {/* Daily controls */}
-      {view==="daily"&&(
-        <div style={{background:"#f1f5f9",padding:"10px 20px",display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid #e2e8f0",flexWrap:"wrap"}}>
-          <span style={{fontSize:15,fontWeight:700,color:"#374151"}}>📋 วันที่:</span>
-          <div style={{width:138}}>
-            <DatePicker value={fmtDate2(selDate)} onChange={v=>{const d=parseDateStr(v);if(d)setSelDate(d);}} dark={false}/>
-          </div>
-          <button onClick={()=>{const d=new Date(selDate);d.setDate(d.getDate()-1);setSelDate(d);}}
-            style={{fontSize:16,padding:"3px 10px",borderRadius:6,border:"1px solid #cbd5e1",background:"#fff",color:"#374151",cursor:"pointer"}}>‹</button>
-          <button onClick={()=>{const d=new Date(selDate);d.setDate(d.getDate()+1);setSelDate(d);}}
-            style={{fontSize:16,padding:"3px 10px",borderRadius:6,border:"1px solid #cbd5e1",background:"#fff",color:"#374151",cursor:"pointer"}}>›</button>
-          <button onClick={()=>setSelDate(new Date())}
-            style={{fontSize:14,padding:"3px 12px",borderRadius:6,border:"1px solid #7c3aed",background:"transparent",color:"#7c3aed",cursor:"pointer",fontWeight:700}}>วันนี้</button>
+      {view==="weekly" && (
+        <div style={{padding:"8px 24px 0",display:"flex",gap:6,flexWrap:"wrap"}}>
+          <button onClick={()=>setFocusDay(null)}
+            style={{padding:"5px 12px",borderRadius:6,border:"none",fontSize:13,fontWeight:700,cursor:"pointer",
+              background:focusDay===null?"var(--accent-color)":"var(--border-panel)",
+              color:focusDay===null?"#fff":"var(--text-secondary)"}}>
+            ทั้งหมด ({weeklyF.length})
+          </button>
+          {weekDays.map((wd,i)=>{
+            const count = flights.filter(f=>sameDay(parseDateStr(f.date),wd)).length;
+            const isSel = !!sameDay(wd, focusDay);
+            return (
+              <button key={i} onClick={()=>setFocusDay(wd)}
+                style={{padding:"5px 12px",borderRadius:6,border:"none",fontSize:13,fontWeight:700,cursor:"pointer",
+                  background:isSel?"var(--accent-color)":"var(--border-panel)",
+                  color:isSel?"#fff":"var(--text-secondary)"}}>
+                {DAY_EN_SHORT[wd.getDay()]} ({count})
+              </button>
+            );
+          })}
         </div>
       )}
 
-      {/* Weekly controls */}
-      {view==="weekly"&&(
-        <div style={{background:"#f1f5f9",padding:"10px 20px",display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid #e2e8f0",flexWrap:"wrap"}}>
-          <span style={{fontSize:15,fontWeight:700,color:"#374151"}}>📅 สัปดาห์:</span>
-          <button onClick={()=>{const d=new Date(weekBase);d.setDate(d.getDate()-7);setWeekBase(d);}}
-            style={{fontSize:16,padding:"3px 10px",borderRadius:6,border:"1px solid #cbd5e1",background:"#fff",color:"#374151",cursor:"pointer"}}>‹</button>
-          <span style={{fontSize:15,fontWeight:700,color:"#1e293b",padding:"3px 12px",background:"#fff",borderRadius:8,border:"1px solid #cbd5e1"}}>
-            {fmtDate2(wMon)} – {fmtDate2(wSun)}
-          </span>
-          <button onClick={()=>{const d=new Date(weekBase);d.setDate(d.getDate()+7);setWeekBase(d);}}
-            style={{fontSize:16,padding:"3px 10px",borderRadius:6,border:"1px solid #cbd5e1",background:"#fff",color:"#374151",cursor:"pointer"}}>›</button>
-        </div>
-      )}
-
-      {/* Toast */}
-      {toast&&<div style={{position:"fixed",top:20,right:24,zIndex:999,background:toast.color,color:"#fff",padding:"12px 25px",borderRadius:10,fontWeight:700,fontSize:16,boxShadow:"0 4px 12px #0004"}}>{toast.msg}</div>}
-
-      {/* Form */}
+      {/* Form area */}
       {mode!==null&&(
-        <div style={{padding:"12px 0 0"}}>
+        <div style={{padding:"15px 24px 0"}}>
           <FlightForm
-            init={mode==="add"?null:flights[mode]}
+            init={mode==="add" ? null : flights[mode]}
             onSave={handleSave}
-            onCancel={()=>{ setMode(null); setFocusDay(null); }}
-            onDateChange={(dateStr)=>{
-              if (view==="weekly") {
-                const d = parseDateStr(dateStr);
-                if (d) setFocusDay(d); else setFocusDay(null);
-              }
-            }}
+            onCancel={()=>setMode(null)}
+            onDateChange={view==="daily"? (v)=>{const p=parseDateStr(v); if(p)setSelDate(p);} : null}
           />
         </div>
       )}
 
-      {/* Confirm Delete */}
-      {delIdx!==null&&(
-        <div style={{background:"rgba(239,68,68,0.1)",border:"1px solid #ef4444",borderRadius:10,padding:"15px 20px",margin:"10px 0",display:"flex",alignItems:"center",gap:15}}>
-          <span style={{color:"#fca5a5",fontSize:16,flex:1}}>⚠️ ยืนยันลบ <b>{flights[delIdx]?.cs||flights[delIdx]?.mission}</b> ?</span>
-          <button onClick={()=>setDelIdx(null)} style={{padding:"6px 18px",borderRadius:8,border:"1px solid #334155",background:"transparent",color:"#94a3b8",cursor:"pointer",fontSize:15}}>ยกเลิก</button>
-          <button onClick={()=>handleDelete(delIdx)} style={{padding:"6px 18px",borderRadius:8,border:"none",background:"#ef4444",color:"#fff",cursor:"pointer",fontSize:15,fontWeight:700}}>ลบ</button>
-        </div>
-      )}
-
-      {/* Weekly grouped view */}
-      {view==="weekly"&&(
-        <div style={{background:"#fff",borderRadius:"0 0 10px 10px",border:"1px solid #e2e8f0",overflow:"hidden"}}>
-          {weekDaysToShow.map((wd,wi)=>{
-            const isToday2 = !!sameDay(wd,today);
-            const dow=wd.getDay();
-            const DAY_COLORS = {0:"#ef4444",1:"#eab308",2:"#ec4899",3:"#22c55e",4:"#f97316",5:"#38bdf8",6:"#7c3aed"};
-            const headerBg = DAY_COLORS[dow];
-            const rowBg=dow===0?"#fff5f5":dow===1?"#fefce8":dow===2?"#fdf2f8":dow===3?"#f0fdf4":dow===4?"#fff7ed":dow===5?"#f0f9ff":"#f9f7ff";
-            const borderColor=dow===0?"#fca5a5":dow===1?"#fde047":dow===2?"#f9a8d4":dow===3?"#86efac":dow===4?"#fdba74":dow===5?"#7dd3fc":"#c4b5fd";
-            const dayFlights=sortFlights(flights.filter(f=>sameDay(parseDateStr(f.date),wd)));
-            return (
-              <div key={wi} style={{borderBottom:`1px solid ${borderColor}`,background:rowBg}}>
-                <div style={{padding:"10px 20px",display:"flex",alignItems:"center",gap:12,background:headerBg,borderBottom:dayFlights.length?`1px solid ${borderColor}`:"none"}}>
-                  <span style={{fontWeight:800,fontSize:16,color:"#fff",minWidth:50,textShadow:"0 1px 2px rgba(0,0,0,0.3)"}}>{DAY_EN_SHORT[dow]}</span>
-                  <span style={{fontSize:15,color:"rgba(255,255,255,0.9)",fontWeight:600,textShadow:"0 1px 2px rgba(0,0,0,0.2)"}}>{fmtDate2(wd)}</span>
-                  {isToday2&&<span style={{fontSize:12,background:"rgba(0,0,0,0.25)",color:"#fff",borderRadius:5,padding:"1px 8px",fontWeight:700}}>TODAY</span>}
-                </div>
-                {dayFlights.length>0&&(
-                  isMobile ? (
-                    <div style={{display:"flex",flexDirection:"column",gap:10,padding:12}}>
-                      {dayFlights.map((f,fi)=>{
-                        const realIdx=flights.indexOf(f);
-                        const dc=DC[f.day]||"#3b82f6";
-                        return (
-                          <div key={fi} style={{background:"rgba(255, 255, 255, 0.75)",border:`1px solid ${borderColor}`,borderRadius:10,padding:12,display:"flex",flexDirection:"column",gap:8,boxShadow:"0 2px 4px rgba(0,0,0,0.03)"}}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                <span style={{background:dc,color:"#fff",fontWeight:800,fontSize:11,padding:"1px 6px",borderRadius:3}}>{f.day}</span>
-                                <span style={{background:f.acTypeF==="S-92A"?"#d1fae5":"#e0f2fe",color:f.acTypeF==="S-92A"?"#065f46":"#0369a1",fontWeight:700,fontSize:11,padding:"1px 5px",borderRadius:3}}>{f.acTypeF||"—"}</span>
-                              </div>
-                              <div style={{display:"flex",gap:6}}>
-                                <button onClick={()=>setMode(realIdx)} style={{padding:"3px 8px",fontSize:12,borderRadius:5,border:"1px solid #3b82f6",background:"transparent",color:"#3b82f6",cursor:"pointer"}}>✏️</button>
-                                <button onClick={()=>setDelIdx(realIdx)} style={{padding:"3px 8px",fontSize:12,borderRadius:5,border:"1px solid #ef4444",background:"transparent",color:"#ef4444",cursor:"pointer"}}>🗑</button>
-                              </div>
-                            </div>
-                            
-                            <div style={{fontWeight:700,fontSize:14,color:"#1e293b"}}>{f.mission}</div>
-                            
-                            <div style={{display:"grid",gridTemplateColumns:"repeat(2, 1fr)",gap:6,fontSize:13}}>
-                              <div><span style={{color:"var(--text-secondary)"}}>เครื่อง:</span> <strong style={{fontWeight:700}}>{f.ac}</strong></div>
-                              <div><span style={{color:"var(--text-secondary)"}}>Callsign:</span> <strong>{f.cs}</strong></div>
-                              <div><span style={{color:"var(--text-secondary)"}}>Pilot:</span> <strong>{f.pilot}</strong></div>
-                              <div><span style={{color:"var(--text-secondary)"}}>Co-Pilot:</span> <strong>{f.coPilot}</strong></div>
-                            </div>
-                            
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,background:"rgba(0,0,0,0.02)",padding:"4px 8px",borderRadius:6}}>
-                              <div>
-                                <span style={{color:"var(--text-secondary)"}}>เวลา:</span> <span style={{fontFamily:"monospace",fontWeight:700,color:"#0f766e"}}>{f.takeoff}</span> - <span style={{fontFamily:"monospace",fontWeight:700,color:"#9333ea"}}>{f.land}</span>
-                              </div>
-                              <div style={{fontSize:12,color:"var(--text-secondary)"}}>{f.route}</div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div style={{overflowX:"auto"}}>
-                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:15,minWidth:900}}>
-                        <tbody>
-                          {dayFlights.map((f,fi)=>{
-                            const realIdx=flights.indexOf(f);
-                            const dc=DC[f.day]||"#3b82f6";
-                            return (
-                              <tr key={fi} style={{borderTop:`1px solid ${borderColor}`,background:fi%2===0?rowBg:"rgba(255,255,255,0.6)"}}>
-                              <td style={{padding:"10px 12px",width:75,textAlign:"center"}}><span style={{background:dc,color:"#fff",fontWeight:800,fontSize:12,padding:"2px 8px",borderRadius:3}}>{f.day}</span></td>
-                              <td style={{padding:"7px 4px",textAlign:"center"}}>
-                                <span style={{background:f.acTypeF==="S-92A"?"#d1fae5":"#e0f2fe",color:f.acTypeF==="S-92A"?"#065f46":"#0369a1",fontWeight:700,fontSize:12,padding:"1px 6px",borderRadius:3}}>{f.acTypeF||"—"}</span>
-                              </td>
-                              <td style={{padding:"10px 12px",fontWeight:600,color:"#1e293b",minWidth:162}}>{f.mission}</td>
-                              <td style={{padding:"10px 10px",textAlign:"center",minWidth:56,fontWeight:700}}>{f.ac}</td>
-                              <td style={{padding:"10px 10px",textAlign:"center",minWidth:100}}>{f.cs}</td>
-                              <td style={{padding:"10px 10px",textAlign:"center",fontWeight:600,minWidth:100}}>{f.pilot}</td>
-                              <td style={{padding:"10px 10px",textAlign:"center",minWidth:100}}>{f.coPilot}</td>
-                              <td style={{padding:"10px 10px",textAlign:"center",fontFamily:"monospace",fontWeight:700,color:"#0f766e",minWidth:69}}>{f.takeoff}</td>
-                              <td style={{padding:"10px 10px",textAlign:"center",fontFamily:"monospace",fontWeight:700,color:"#9333ea",minWidth:69}}>{f.land}</td>
-                              <td style={{padding:"10px 10px",fontSize:14,color:"var(--text-secondary)"}}>{f.route}</td>
-                              <td style={{padding:"10px",textAlign:"center"}}>
-                                <div style={{display:"flex",gap:5}}>
-                                  <button onClick={()=>setMode(realIdx)} style={{padding:"3px 10px",fontSize:12,borderRadius:5,border:"1px solid #3b82f6",background:"transparent",color:"#3b82f6",cursor:"pointer"}}>✏️</button>
-                                  <button onClick={()=>setDelIdx(realIdx)} style={{padding:"3px 10px",fontSize:12,borderRadius:5,border:"1px solid #ef4444",background:"transparent",color:"#ef4444",cursor:"pointer"}}>🗑</button>
-                                </div>
-                              </td>
-                            </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                )}
-                {dayFlights.length===0&&<div style={{padding:"8px 20px 12px",fontSize:14,color:"#94a3b8"}}>— ไม่มีการบิน</div>}
-              </div>
-            );
-          })}
-          <div style={{textAlign:"center",padding:"6px 0 12px",fontSize:90,fontWeight:900,color:"#e2e8f0",userSelect:"none",lineHeight:1}}>201</div>
-        </div>
-      )}
-
-      {/* Daily table */}
-      {view==="daily"&&(
-        <div style={{background:"#fff",borderRadius:"0 0 10px 10px",overflow:"hidden",border:"1px solid #e2e8f0"}}>
-          <div>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,tableLayout:"fixed"}}>
-              <thead>
-                <tr style={{background:"#7c3aed"}}>
-                  <th style={{padding:0,width:0,border:"none"}}></th>
-                  {COLS.map(c=><th key={c.k} style={{padding:"8px 4px",color:"#fff",fontWeight:800,fontSize:12,textAlign:"center",width:c.w,borderRight:"1px solid #6d28d9",overflow:"hidden"}}>{c.l}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {shown.length===0&&(
-                  <tr><td colSpan={COLS.length+1} style={{padding:"40px",textAlign:"center",color:"#94a3b8",fontSize:16}}>
-                    {view==="daily"?`ไม่มีการบินในวันที่ ${fmtDate2(selDate)}`:"ยังไม่มีข้อมูล"}
-                  </td></tr>
-                )}
-                {shown.map((f,i)=>renderFlightRow(f, flights.indexOf(f), i))}
-              </tbody>
-            </table>
+      {/* Main Content View */}
+      <div style={{padding:"15px 24px 20px"}}>
+        {/* Weekly grouped view */}
+        {view==="weekly"&&(
+          <div className="table-container" style={{borderRadius:"0 0 16px 16px", borderTop:"none"}}>
+            <div className="scrollbar-free-table-wrapper" style={{overflowX:"auto"}}>
+              <table className="scrollbar-free-table" style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead>
+                  <tr style={{background:"var(--bg-card)"}}>
+                    <th style={{padding:0,width:0,border:"none"}}></th>
+                    {COLS.map(c=><th key={c.k} style={{padding:"8px 5px",color:"var(--text-primary)",fontWeight:800,fontSize:12,textAlign:"center",width:c.w,borderRight:"1px solid var(--border-panel)",overflow:"hidden"}}>{c.l}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.length===0&&(
+                    <tr><td colSpan={COLS.length+1} style={{padding:"40px",textAlign:"center",color:"var(--text-secondary)",fontSize:16}}>
+                      ยังไม่มีข้อมูลการบินในสัปดาห์นี้
+                    </td></tr>
+                  )}
+                  {weekDaysToShow.map(wd => {
+                    const dayFlights = sortFlights(flights.filter(f=>sameDay(parseDateStr(f.date),wd)));
+                    return dayFlights.map(f => renderFlightRow(f, flights.indexOf(f), flights.indexOf(f)));
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{textAlign:"center",padding:"6px 0 12px",fontSize:90,fontWeight:900,color:"rgba(255,255,255,0.015)",userSelect:"none",lineHeight:1}}>201</div>
           </div>
-          <div style={{textAlign:"center",padding:"6px 0 12px",fontSize:90,fontWeight:900,color:"#e2e8f0",userSelect:"none",lineHeight:1}}>201</div>
-        </div>
-      )}
+        )}
 
-      <div style={{marginTop:12,fontSize:14,color:"var(--text-secondary)",textAlign:"right"}}>
-        รวม {flights.length} sortie ทั้งหมด · แสดง {shown.length} sortie
+        {/* Daily table */}
+        {view==="daily"&&(
+          <div className="table-container" style={{borderRadius:"0 0 16px 16px", borderTop:"none"}}>
+            <div className="scrollbar-free-table-wrapper" style={{overflowX:"auto"}}>
+              <table className="scrollbar-free-table" style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead>
+                  <tr style={{background:"var(--bg-card)"}}>
+                    <th style={{padding:0,width:0,border:"none"}}></th>
+                    {COLS.map(c=><th key={c.k} style={{padding:"8px 5px",color:"var(--text-primary)",fontWeight:800,fontSize:12,textAlign:"center",width:c.w,borderRight:"1px solid var(--border-panel)",overflow:"hidden"}}>{c.l}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.length===0&&(
+                    <tr><td colSpan={COLS.length+1} style={{padding:"40px",textAlign:"center",color:"var(--text-secondary)",fontSize:16}}>
+                      {view==="daily"?`ไม่มีการบินในวันที่ ${fmtDate2(selDate)}`:"ยังไม่มีข้อมูล"}
+                    </td></tr>
+                  )}
+                  {shown.map((f,i)=>renderFlightRow(f, flights.indexOf(f), i))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{textAlign:"center",padding:"6px 0 12px",fontSize:90,fontWeight:900,color:"rgba(255,255,255,0.015)",userSelect:"none",lineHeight:1}}>201</div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
-// ── Duty Tab ────────────────────────────────────────────────────────────────────
-const MONTH_NAME_TH2 = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
-const DAY_EN_FULL = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-const DAY_EN_SHORT = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
-
 function generateMonthRows(year, month) {
   // month = 0-indexed JS month
   const daysInMonth = new Date(year, month+1, 0).getDate();
@@ -1971,14 +2628,12 @@ function NewMonthModal({ onClose, onCreate }) {
           </select>
           <select value={selYear} onChange={e=>changeMonth(Number(e.target.value),selMonth)}
             style={{...inp,width:"auto",minWidth:112}}>
-            {[2025,2026,2027,2028].map(y=><option key={y} value={y}>{y+543} ({y})</option>)}
+            {[2024,2025,2026,2027,2028].map(y=><option key={y} value={y}>{y+543} ({y})</option>)}
           </select>
           <span style={{fontSize:15,color:"#38bdf8",fontWeight:700,marginLeft:10}}>
             {MONTH_NAME_TH2[selMonth]} {selYear+543} · {rows.length} วัน
           </span>
         </div>
-
-
 
         {/* ตารางรายวัน */}
         <div style={{overflowX:"auto",maxHeight:"45vh",overflowY:"auto",borderRadius:10,border:"1px solid #1e3a5f"}}>
@@ -2009,7 +2664,7 @@ function NewMonthModal({ onClose, onCreate }) {
         </div>
 
         {/* Footer */}
-        <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:20}}>
+        <div style={{display:"flex",gap:12,justify:"flex-end",marginTop:20}}>
           <button onClick={onClose}
             style={{padding:"10px 25px",fontSize:16,borderRadius:9,border:"1px solid #334155",background:"transparent",color:"#94a3b8",cursor:"pointer"}}>
             ยกเลิก
@@ -2024,210 +2679,315 @@ function NewMonthModal({ onClose, onCreate }) {
   );
 }
 
-function DutyTab() {
-  const [view,setView]=useState("daily");
-  const [monthly, setMonthly] = useState(MONTHLY);
-  const [dutyLoaded, setDutyLoaded] = useState(false);
-  const [editIdx, setEditIdx] = useState(null);
-  const [editRow, setEditRow] = useState(null);
-  const [toast,   setToast]   = useState(null);
-  const [showNew, setShowNew] = useState(false);
-  const [monthLabel, setMonthLabel] = useState("พฤษภาคม 2569");
-  const [syncing, setSyncing] = useState(false);
+// ── Duty Sheet loader (new sheet ID) ─────────────────────────────────────────
+const DUTY_SHEET_ID = "1NLqQWzaiLU7x0Q5WOU9qhdZRSaCsfpYjldc9w3QKE-8";
+const DUTY_GVIZ_URL = `https://docs.google.com/spreadsheets/d/${DUTY_SHEET_ID}/gviz/tq?tqx=out:csv`;
 
-  const sq=DUTY_TODAY.sqdn201;
-  const hdr=(bg="#2563eb")=>({background:bg,color:"#fff",padding:"10px 18px",fontWeight:800,fontSize:15,letterSpacing:1,textAlign:"center"} as any);
-  const rowBg=t=>t==="saturday"?"#ede9fe":t==="sunday"||t==="holiday"?"#fce7f3":"#fff";
-  const dayC =t=>t==="saturday"?"#7c3aed":t==="sunday"||t==="holiday"?"#dc2626":"#1e293b";
-
-  const showToast = (msg) => { setToast(msg); setTimeout(()=>setToast(null),3000); };
-
-  // โหลดจาก Sheet
-  useEffect(() => {
-    loadFromSheet("DUTY").then(rows => {
-      if (rows.length > 1) {
-        const [header, ...data] = rows;
-        const loaded = data.map(r => ({day:r[0]||"",date:r[1]||"",alert:r[2]||"",sof:r[3]||"",base:r[4]||"",topic:r[5]||"",d9923:r[6]||"",csqdn:r[7]||"",rmk:r[8]||"",type:r[9]||"weekday"}));
-        if (loaded.length > 0) {
-          setMonthly(loaded);
-          if (header[10]) setMonthLabel(String(header[10]));
-        }
-      }
-      setDutyLoaded(true);
-    }).catch(()=>setDutyLoaded(true));
-  }, []);
-
-  // บันทึกแบบระบุการกระทำ — เรียกใช้โดยตรงเมื่อมีการเปลี่ยนแปลง
-  const saveDutyToSheet = (updatedMonthly, label = monthLabel) => {
-    setSyncing(true);
-    const rows = [
-      ["day","date","alert","sof","base","topic","d9923","csqdn","rmk","type", label],
-      ...updatedMonthly.map(r=>[r.day,r.date,r.alert,r.sof,r.base,r.topic,r.d9923,r.csqdn,r.rmk,r.type])
-    ];
-    saveToSheet("DUTY", rows).finally(()=>setSyncing(false));
-  };
-
-  const startEdit = (i) => { setEditIdx(i); setEditRow({...monthly[i]}); };
-  const cancelEdit = () => { setEditIdx(null); setEditRow(null); };
-  const saveEdit = () => {
-    const next = monthly.map((r,i)=>i===editIdx?editRow:r);
-    setMonthly(next);
-    saveDutyToSheet(next);
-    setEditIdx(null); setEditRow(null);
-    showToast("บันทึกข้อมูลเรียบร้อย ✓ sync แล้ว");
-  };
-  const setField = (k,v) => setEditRow(p=>({...p,[k]:v}));
-
-  const handleCreate = (rows, yr, mo) => {
-    const label = `${MONTH_NAME_TH2[mo]} ${yr+543}`;
-    setMonthly(rows);
-    setMonthLabel(label);
-    saveDutyToSheet(rows, label);
-    setShowNew(false);
-    setView("monthly");
-    showToast(`✓ สร้างตารางเวร ${label} สำเร็จ — ${rows.length} วัน`);
-  };
-
-  const inpStyle = {background:"#fff",border:"1px solid #cbd5e1",color:"#1e293b",borderRadius:5,padding:"3px 8px",fontSize:14,width:"100%",boxSizing:"border-box" as any};
-
-  return <div style={{background:"#f8fafc",minHeight:"80vh"}}>
-    {showNew && <NewMonthModal onClose={()=>setShowNew(false)} onCreate={handleCreate}/>}
-    {toast && <div style={{position:"fixed",top:20,right:24,zIndex:999,background:"#22c55e",color:"#fff",padding:"12px 25px",borderRadius:10,fontWeight:700,fontSize:16,boxShadow:"0 4px 12px #0004"}}>{toast}</div>}
-
-    {/* Header */}
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 24px 0",flexWrap:"wrap",gap:10}}>
-      <div style={{display:"flex",background:"#e2e8f0",borderRadius:10,padding:3,gap:2}}>
-        {["daily","monthly"].map(v=>(
-          <button key={v} onClick={()=>setView(v)} style={{padding:"8px 20px",borderRadius:8,border:"none",cursor:"pointer",fontWeight:700,fontSize:15,background:view===v?"#fff":"transparent",color:view===v?"#1e293b":"var(--text-secondary)",boxShadow:view===v?"0 1px 4px #0002":"none"}}>
-            {v==="daily"?"📋 รายวัน":"📅 ประจำเดือน"}
-          </button>
-        ))}
-      </div>
-      <div style={{textAlign:"center",flex:1}}>
-        <div style={{display:"inline-block",background:"linear-gradient(135deg,#4f46e5,#7c3aed)",borderRadius:12,padding:"12px 60px"}}>
-          <span style={{fontSize:28,fontWeight:900,color:"#fff",letterSpacing:2}}>PILOTS ON DUTY</span>
-        </div>
-      </div>
-      <button onClick={()=>setShowNew(true)}
-        style={{background:"#4f46e5",border:"none",color:"#fff",borderRadius:9,padding:"10px 20px",fontSize:15,fontWeight:800,cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
-        📅 สร้างตารางเดือนใหม่
-      </button>
-    </div>
-
-    {/* DAILY */}
-    {view==="daily"&&<div style={{padding:"18px 30px"}}>
-      <div style={{textAlign:"center",margin:"10px 0 18px"}}>
-        <span style={{fontSize:30,fontWeight:900,color:"#1e293b"}}>TODAY</span>
-        <span style={{fontSize:22,color:"var(--text-secondary)",marginLeft:18}}>{DUTY_TODAY.date}</span>
-      </div>
-      <div style={{display:"flex",gap:22,alignItems:"flex-start",flexWrap:"wrap"}}>
-        <div style={{flex:"0 0 330px"}}>
-          <div style={{textAlign:"center",marginBottom:12}}><span style={{background:"#2563eb",color:"#fff",fontWeight:900,fontSize:19,padding:"8px 28px",borderRadius:8}}>201 SQUADRON</span></div>
-          <div style={{background:"#fff",borderRadius:12,overflow:"hidden",border:"1px solid #cbd5e1"}}>
-            {[["ALERT 1","TEL."],[sq.alert1.name,sq.alert1.tel],["SOF ▾","TEL."],[sq.sof.name,sq.sof.tel],["EMERGENCY ▾","TOPIC"],[sq.emergency.name||"\u00A0",sq.emergency.topic||"\u00A0"],["BASE OPS. ▾","Tel.BaseOps"],[sq.baseOps.name,sq.baseOps.tel]].map(([a,b],i)=>(
-              <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 1fr",...(i%2===0?{background:"#2563eb"}:{borderBottom:"1px solid #e2e8f0"})}}>
-                {i%2===0?<><div style={hdr()}>{a}</div><div style={hdr()}>{b}</div></>:<><div style={{padding:"15px 18px",fontSize:18,fontWeight:600,color:"#1e293b",textAlign:"center"}}>{a}</div><div style={{padding:"15px 18px",fontSize:18,color:"#1e293b",textAlign:"center",fontFamily:"monospace"}}>{b}</div></>}
-              </div>
-            ))}
-            <div style={{background:"#334155",padding:"10px 18px",textAlign:"center"}}><span style={{color:"#fff",fontWeight:800,fontSize:15}}>REMARK ▾</span></div>
-            <div style={{padding:"15px 18px",minHeight:50,fontSize:18,color:"#94a3b8"}}>{sq.remark||"\u00A0"}</div>
-          </div>
-        </div>
-        <div style={{flex:1,minWidth:300}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18}}>
-            {[{label:"9923 DETACHMENT",color:"#f97316",list:DUTY_TODAY.det9923},{label:"C SQUADRON",color:"#eab308",list:DUTY_TODAY.cSqdn}].map(g=>(
-              <div key={g.label}>
-                <div style={{textAlign:"center",marginBottom:10}}><span style={{background:g.color,color:"#fff",fontWeight:900,fontSize:18,padding:"6px 20px",borderRadius:8}}>{g.label}</span></div>
-                {g.list.map((n,i)=><div key={i} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"15px",textAlign:"center",fontSize:19,fontWeight:600,color:"#1e293b",marginBottom:9}}>{n}</div>)}
-              </div>
-            ))}
-          </div>
-          <div style={{marginTop:25}}>
-            <div style={{display:"flex",alignItems:"center",gap:18,marginBottom:12}}>
-              <span style={{fontSize:25,fontWeight:900,color:"#1e293b",border:"2px solid #94a3b8",borderRadius:10,padding:"3px 20px"}}>TOMORROW</span>
-              <span style={{fontSize:20,color:"var(--text-secondary)"}}>{DUTY_TMR.date}</span>
-            </div>
-            <div style={{background:"#fff",borderRadius:12,overflow:"hidden",border:"1px solid #cbd5e1"}}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",background:"#374151"}}>
-                {["ALERT 1 ▾","SOF","EMERGENCY BRIEF"].map(h=><div key={h} style={{padding:"10px",color:"#fff",fontWeight:800,fontSize:14,textAlign:"center"}}>{h}</div>)}
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr"}}>
-                <div style={{padding:"15px",fontSize:18,fontWeight:600,color:"#1e293b",textAlign:"center"}}>{DUTY_TMR.alert1}</div>
-                <div style={{padding:"15px",fontSize:18,color:"#94a3b8",textAlign:"center"}}>{DUTY_TMR.sof}</div>
-                <div style={{padding:"15px",fontSize:18,color:"#94a3b8",textAlign:"center"}}>{DUTY_TMR.brief}</div>
-              </div>
-            </div>
-            <div onClick={()=>setView("monthly")} style={{marginTop:12,background:"#e2e8f0",borderRadius:10,padding:"15px",textAlign:"center",cursor:"pointer",border:"1px solid #cbd5e1"}}>
-              <span style={{fontWeight:800,color:"#1e293b",fontSize:16,textDecoration:"underline"}}>Pilots on duty monthly schedule CLICK !!!</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>}
-
-    {/* MONTHLY */}
-    {view==="monthly"&&<div style={{padding:"15px 30px"}}>
-      <div style={{display:"flex",alignItems:"center",gap:15,marginBottom:10}}>
-        <span style={{fontSize:18,fontWeight:800,color:"#4f46e5"}}>📅 ตารางเวร {monthLabel}</span>
-        <span style={{fontSize:14,color:"var(--text-secondary)"}}>· คลิก ✏️ เพื่อแก้ไข</span>
-        <button onClick={()=>setShowNew(true)} style={{marginLeft:"auto",fontSize:14,padding:"5px 15px",borderRadius:8,border:"1px solid #a5b4fc",background:"transparent",color:"#4f46e5",cursor:"pointer",fontWeight:700}}>
-          + สร้างเดือนใหม่
-        </button>
-      </div>
-      <div style={{background:"#fff",borderRadius:12,overflow:"hidden",border:"1px solid #e2e8f0"}}>
-        <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:15,minWidth:900}}>
-            <thead><tr style={{background:"#4f46e5"}}>
-              {["DAY","DATE","ALERT","SOF","BASE OPS.","อบรมวิชาการ","9923","C SQDN","REMARK","แก้ไข"].map(h=><th key={h} style={{padding:"11px 12px",color:"#fff",fontWeight:800,fontSize:14,textAlign:"center",borderRight:"1px solid #4338ca"}}>{h}</th>)}
-            </tr></thead>
-            <tbody>
-              {monthly.map((r,i)=>{
-                const isToday=r.date==="29 May";
-                const isEditing=editIdx===i;
-                if (isEditing && editRow) {
-                  return (
-                    <tr key={i} style={{background:"#eff6ff",borderBottom:"2px solid #3b82f6"}}>
-                      <td style={{padding:"10px 12px",textAlign:"center",fontWeight:700,color:dayC(editRow.type)}}>{editRow.day}</td>
-                      <td style={{padding:"8px 10px",minWidth:162}}>
-                        <DatePicker value={editRow.date} onChange={v=>setField("date",v)} dark={false}/>
-                      </td>
-                      {["alert","sof","base","topic","d9923","csqdn","rmk"].map(k=>(
-                        <td key={k} style={{padding:"5px 8px"}}>
-                          <input value={editRow[k]||""} onChange={e=>setField(k,e.target.value)} style={inpStyle}/>
-                        </td>
-                      ))}
-                      <td style={{padding:"8px 10px",textAlign:"center",whiteSpace:"nowrap"}}>
-                        <button onClick={saveEdit} style={{fontSize:14,padding:"3px 12px",borderRadius:6,border:"none",background:"#22c55e",color:"#fff",cursor:"pointer",fontWeight:700,marginRight:5}}>✓ บันทึก</button>
-                        <button onClick={cancelEdit} style={{fontSize:14,padding:"3px 10px",borderRadius:6,border:"1px solid #cbd5e1",background:"transparent",color:"var(--text-secondary)",cursor:"pointer"}}>✕</button>
-                      </td>
-                    </tr>
-                  );
-                }
-                return <tr key={i} style={{borderBottom:"1px solid #e2e8f0",background:isToday?"#dbeafe":rowBg(r.type),outline:isToday?"2px solid #3b82f6":"none"}}>
-                  <td style={{padding:"10px 12px",textAlign:"center",fontWeight:700,color:dayC(r.type),whiteSpace:"nowrap"}}>{r.day}{isToday&&<span style={{marginLeft:5,fontSize:11,background:"#3b82f6",color:"#fff",borderRadius:3,padding:"1px 5px"}}>TODAY</span>}</td>
-                  <td style={{padding:"10px 12px",textAlign:"center",fontWeight:600,color:dayC(r.type),whiteSpace:"nowrap"}}>{r.date}</td>
-                  <td style={{padding:"10px 12px",textAlign:"center",fontWeight:600,color:"#1e293b"}}>{r.alert}</td>
-                  <td style={{padding:"10px 12px",textAlign:"center",color:"#374151"}}>{r.sof}</td>
-                  <td style={{padding:"10px 12px",textAlign:"center",color:"#374151"}}>{r.base}</td>
-                  <td style={{padding:"10px 12px",textAlign:"center",fontSize:14,color:"#374151"}}>{r.topic}</td>
-                  <td style={{padding:"10px 12px",fontSize:14,color:"#374151"}}>{r.d9923}</td>
-                  <td style={{padding:"10px 12px",fontSize:14,color:"#374151"}}>{r.csqdn}</td>
-                  <td style={{padding:"10px 12px",textAlign:"center",color:r.rmk?"#dc2626":"#94a3b8",fontWeight:r.rmk?700:400,fontSize:14}}>{r.rmk}</td>
-                  <td style={{padding:"10px",textAlign:"center"}}>
-                    <button onClick={()=>startEdit(i)} style={{fontSize:14,padding:"3px 10px",borderRadius:6,border:"1px solid #a5b4fc",background:"transparent",color:"#4f46e5",cursor:"pointer"}}>✏️</button>
-                  </td>
-                </tr>;
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>}
-  </div>;
+async function loadDutySheetCSV(): Promise<string[][]> {
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 20000);
+    const res = await fetch(DUTY_GVIZ_URL, { signal: controller.signal });
+    clearTimeout(t);
+    const text = await res.text();
+    if (!text || text.trim().startsWith("<")) throw new Error("Not CSV — sheet may not be public");
+    return parseCSV(text);
+  } catch (e) {
+    console.error("[DutyTab] load error:", e);
+    throw e;
+  }
 }
 
-// ── Aircraft Tab ────────────────────────────────────────────────────────────────
-const STATUSES = ["FMC","PMC","NMC"];
+const FULL_DAY_EN: Record<number,string> = {
+  0:"SUNDAY",1:"MONDAY",2:"TUESDAY",3:"WEDNESDAY",4:"THURSDAY",5:"FRIDAY",6:"SATURDAY"
+};
+const MONTH_UPPER = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+const THAI_MONTHS: Record<string, number> = {
+  "ม.ค.":0,"ก.พ.":1,"มี.ค.":2,"เม.ย.":3,"พ.ค.":4,"มิ.ย.":5,
+  "ก.ค.":6,"ส.ค.":7,"ก.ย.":8,"ต.ค.":9,"พ.ย.":10,"ธ.ค.":11,
+  "มกราคม":0,"กุมภาพันธ์":1,"มีนาคม":2,"เมษายน":3,"พฤษภาคม":4,"มิถุนายน":5,
+  "กรกฎาคม":6,"สิงหาคม":7,"กันยายน":8,"ตุลาคม":9,"พฤศจิกายน":10,"ธันวาคม":11
+};
+
+function parseDutyDate(raw: string): { dayFull: string; dateStr: string } {
+  if (!raw) return { dayFull: "", dateStr: "" };
+  let d: Date | null = null;
+  
+  const thMatch = raw.match(/^(?:.*,\s*)?(\d{1,2})\s+([^\s]+)\s+(\d{2,4})$/);
+  if (thMatch) {
+    let y = parseInt(thMatch[3], 10);
+    if (y < 100) y += 2000;
+    else if (y > 2500) y -= 543;
+    const m = THAI_MONTHS[thMatch[2]];
+    if (m !== undefined) {
+      d = new Date(y, m, parseInt(thMatch[1], 10));
+    }
+  }
+
+  if (!d || isNaN(d.getTime())) {
+    const iso = new Date(raw);
+    if (!isNaN(iso.getTime())) { d = iso; }
+    else {
+      const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (slash) d = new Date(+slash[3], +slash[2]-1, +slash[1]);
+      else {
+        const sp = raw.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
+        if (sp) {
+          const mIdx = MONTH_UPPER.findIndex(m => m.toLowerCase()===sp[2].toLowerCase());
+          if (mIdx>=0) d = new Date(+sp[3], mIdx, +sp[1]);
+        }
+      }
+    }
+  }
+  
+  if (!d || isNaN(d.getTime())) return { dayFull: raw.toUpperCase(), dateStr: raw };
+  return {
+    dayFull: FULL_DAY_EN[d.getDay()] || "",
+    dateStr: `${d.getDate()} ${MONTH_UPPER[d.getMonth()]} ${d.getFullYear()}`
+  };
+}
+
+function parseDutyRowNew(r: string[]) {
+  const { dayFull, dateStr } = parseDutyDate((r[0]||"").trim());
+  const join = (...cols: string[]) => cols.map(c=>(c||"").trim()).filter(Boolean).join(" - ");
+  return {
+    dayFull, dateStr,
+    alert:     (r[1] ||"").trim(),
+    sof:       (r[3] ||"").trim(),
+    baseops:   (r[5] ||"").trim() || "-",
+    emerBrief: (r[7] ||"").trim(),
+    remark:    (r[9] ||"").trim(),
+    det9923:   join(r[10], r[11], r[12]),
+    cSqdn:     join(r[16], r[17], r[18], r[19]),
+  };
+}
+
+const DAY_CLR: Record<string,string> = {
+  MONDAY:"#eab308", TUESDAY:"#ec4899", WEDNESDAY:"#22c55e",
+  THURSDAY:"#f97316", FRIDAY:"#06b6d4", SATURDAY:"#a855f7", SUNDAY:"#ef4444"
+};
+
+function DutyTab({ theme }: { theme?: string }) {
+  const [view, setView]           = useState("daily");
+  const [rows, setRows]           = useState<any[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [loadErr, setLoadErr]     = useState<string|null>(null);
+  const [attempt, setAttempt]     = useState(0);
+  const [toast, setToast]         = useState<string|null>(null);
+
+  const showToast = (m:string) => { setToast(m); setTimeout(()=>setToast(null),3000); };
+
+  useEffect(()=>{
+    setLoading(true); setLoadErr(null);
+    loadDutySheetCSV().then(csv=>{
+      console.log("[DutyTab] csv rows:", csv.length, csv[0]);
+      if (csv.length < 2) { setLoadErr("ไม่ได้รับข้อมูล (sheet อาจยังไม่ได้ Share แบบ Anyone with link)"); setLoading(false); return; }
+      const [, ...data] = csv;
+      const parsed = data
+        .filter(r=>r.some(c=>c.trim()!==""))
+        .map(parseDutyRowNew)
+        .filter(r=>r.dateStr!=="");
+      console.log("[DutyTab] parsed:", parsed.length, parsed[0]);
+      if (parsed.length>0) setRows(parsed);
+      else setLoadErr("โหลดได้ "+csv.length+" แถว แต่ parse ไม่ได้ข้อมูล (ตรวจสอบรูปแบบวันที่ใน Column A)");
+      setLoading(false);
+    }).catch(e=>{ setLoadErr("โหลดล้มเหลว: "+(e?.message||String(e))); setLoading(false); });
+  },[attempt]);
+
+  const today = new Date();
+  const todayStr    = `${today.getDate()} ${MONTH_UPPER[today.getMonth()]} ${today.getFullYear()}`;
+  const tmr         = new Date(today); tmr.setDate(today.getDate()+1);
+  const tmrStr      = `${tmr.getDate()} ${MONTH_UPPER[tmr.getMonth()]} ${tmr.getFullYear()}`;
+  const todayRow    = rows.find(r=>r.dateStr===todayStr);
+  const tmrRow      = rows.find(r=>r.dateStr===tmrStr);
+
+  const DayBadge = ({d}:{d:string}) => (
+    <span style={{background:DAY_CLR[d]||"#3b82f6",color:"#fff",fontWeight:900,fontSize:11,
+      padding:"3px 8px",borderRadius:5,letterSpacing:0.5,whiteSpace:"nowrap"}}>{d}</span>
+  );
+
+  const InfoCard = ({label,value,accent="var(--accent-color)"}:{label:string;value:string;accent?:string}) => (
+    <div style={{background:"var(--bg-card)",border:"1px solid var(--border-panel)",
+      borderLeft:`4px solid ${accent}`,borderRadius:10,padding:"14px 18px"}}>
+      <div style={{fontSize:11,color:accent,fontWeight:800,letterSpacing:1,marginBottom:6}}>{label}</div>
+      <div style={{fontSize:16,fontWeight:700,color:"var(--text-primary)",lineHeight:1.3}}>{value||"—"}</div>
+    </div>
+  );
+
+  const rowBg = (d:string) => d==="SATURDAY"?"var(--row-bg-sat)":d==="SUNDAY"?"var(--row-bg-sun)":"transparent";
+
+  return (
+    <div style={{background:"transparent",minHeight:"80vh"}}>
+      {toast&&<div style={{position:"fixed",top:20,right:24,zIndex:999,background:"#22c55e",color:"#fff",
+        padding:"12px 25px",borderRadius:10,fontWeight:700,fontSize:16,boxShadow:"0 4px 12px #0004"}}>{toast}</div>}
+
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 24px 0",flexWrap:"wrap",gap:10}}>
+        <div style={{display:"flex",background:"var(--border-panel)",borderRadius:10,padding:3,gap:2}}>
+          {["daily","monthly"].map(v=>(
+            <button key={v} onClick={()=>setView(v)} style={{padding:"8px 20px",borderRadius:8,border:"none",
+              cursor:"pointer",fontWeight:700,fontSize:15,
+              background:view===v?"var(--bg-card)":"transparent",
+              color:view===v?"var(--text-primary)":"var(--text-secondary)",
+              boxShadow:view===v?"var(--card-shadow)":"none"}}>
+              {v==="daily"?"📋 รายวัน":"📅 ประจำเดือน"}
+            </button>
+          ))}
+        </div>
+        <div style={{textAlign:"center",flex:1}}>
+          <div style={{display:"inline-block",background:"linear-gradient(135deg,var(--accent-color),var(--accent-secondary))",borderRadius:12,padding:"12px 60px"}}>
+            <span style={{fontSize:28,fontWeight:900,color:"#fff",letterSpacing:2}}>PILOTS ON DUTY</span>
+          </div>
+        </div>
+        <button onClick={()=>{setLoading(true);setAttempt(a=>a+1);}}
+          style={{background:"var(--accent-color)",border:"none",color:"#fff",borderRadius:9,
+            padding:"10px 20px",fontSize:15,fontWeight:800,cursor:"pointer"}}>
+          ↻ รีโหลด
+        </button>
+      </div>
+
+      {/* Status */}
+      <div style={{padding:"8px 24px 0"}}>
+        {loading?(
+          <div style={{display:"flex",alignItems:"center",gap:8,color:"var(--text-secondary)",fontSize:13}}>
+            <div className="spinner" style={{width:16,height:16}}></div> กำลังโหลดข้อมูลตารางเวร...
+          </div>
+        ):loadErr?(
+          <div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.35)",borderRadius:8,
+            padding:"8px 14px",fontSize:13,color:"#fca5a5",display:"flex",alignItems:"center",gap:10}}>
+            <span>⚠️ {loadErr}</span>
+            <button onClick={()=>{setLoading(true);setAttempt(a=>a+1);}}
+              style={{background:"rgba(239,68,68,0.2)",border:"1px solid #ef4444",color:"#fca5a5",
+                borderRadius:6,padding:"3px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>↻ ลองอีกครั้ง</button>
+          </div>
+        ):(
+          <div style={{background:"rgba(34,197,94,0.08)",border:"1px solid rgba(34,197,94,0.25)",
+            borderRadius:8,padding:"5px 14px",fontSize:13,color:"#86efac",display:"flex",alignItems:"center",gap:8}}>
+            ✓ โหลดสำเร็จ <span style={{color:"#38bdf8",fontWeight:800}}>{rows.length} วัน</span>
+          </div>
+        )}
+      </div>
+
+      {/* ─── DAILY ─── */}
+      {view==="daily"&&(
+        <div style={{padding:"20px 30px"}}>
+          {/* TODAY */}
+          <div style={{marginBottom:28}}>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
+              <span style={{fontSize:26,fontWeight:900,color:"var(--text-primary)"}}>TODAY</span>
+              <DayBadge d={todayRow?.dayFull||FULL_DAY_EN[today.getDay()]||""}/>
+              <span style={{fontSize:18,color:"var(--text-secondary)",fontWeight:700}}>{todayStr}</span>
+            </div>
+            {todayRow?(
+              <>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:12,marginBottom:12}}>
+                  <InfoCard label="ALERT"     value={todayRow.alert}     accent="#ef4444"/>
+                  <InfoCard label="SOF"       value={todayRow.sof}       accent="#f97316"/>
+                  <InfoCard label="BASE OPS." value={todayRow.baseops}   accent="#06b6d4"/>
+                  <InfoCard label="EMER BRIEF" value={todayRow.emerBrief} accent="#a855f7"/>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                  <InfoCard label="9923 DETACHMENT" value={todayRow.det9923} accent="#eab308"/>
+                  <InfoCard label="C SQUADRON"      value={todayRow.cSqdn}   accent="#22c55e"/>
+                </div>
+                {todayRow.remark&&(
+                  <div style={{marginTop:12,background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",
+                    borderRadius:10,padding:"10px 16px",fontSize:14,color:"#fca5a5"}}>
+                    📌 REMARK: {todayRow.remark}
+                  </div>
+                )}
+              </>
+            ):(
+              <div style={{color:"var(--text-secondary)",fontSize:15,padding:"12px 0"}}>
+                {loading?"กำลังโหลด...":"ไม่พบข้อมูลเวรวันนี้"}
+              </div>
+            )}
+          </div>
+
+          {/* TOMORROW */}
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+              <span style={{fontSize:20,fontWeight:800,color:"var(--text-secondary)",border:"2px solid var(--border-panel)",borderRadius:10,padding:"3px 16px"}}>TOMORROW</span>
+              {tmrRow&&<DayBadge d={tmrRow.dayFull}/>}
+              <span style={{fontSize:16,color:"var(--text-secondary)"}}>{tmrStr}</span>
+            </div>
+            {tmrRow?(
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:10}}>
+                <InfoCard label="ALERT"     value={tmrRow.alert}     accent="#ef4444"/>
+                <InfoCard label="SOF"       value={tmrRow.sof}       accent="#f97316"/>
+                <InfoCard label="BASE OPS." value={tmrRow.baseops}   accent="#06b6d4"/>
+                <InfoCard label="EMER BRIEF" value={tmrRow.emerBrief} accent="#a855f7"/>
+              </div>
+            ):(
+              <div style={{color:"var(--text-secondary)",fontSize:14}}>ไม่พบข้อมูลเวรพรุ่งนี้</div>
+            )}
+          </div>
+
+
+        </div>
+      )}
+
+      {/* ─── MONTHLY ─── */}
+      {view==="monthly"&&(
+        <div style={{padding:"15px 30px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:15,marginBottom:12}}>
+            <span style={{fontSize:18,fontWeight:800,color:"var(--accent-color)"}}>📅 ตารางเวรประจำเดือน ({MONTH_UPPER[today.getMonth()]} {today.getFullYear()})</span>
+            <span style={{fontSize:14,color:"var(--text-secondary)"}}>· {rows.filter(r=>r.dateStr.includes(`${MONTH_UPPER[today.getMonth()]} ${today.getFullYear()}`)).length} วัน</span>
+          </div>
+          <div className="table-container">
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:14,minWidth:900}}>
+                <thead>
+                  <tr style={{background:"var(--accent-color)"}}>
+                    {["DAY","DATE","ALERT","SOF","BASE OPS.","EMER BRIEF","9923","C SQDN","REMARK"].map(h=>(
+                      <th key={h} style={{padding:"10px 8px",color:"#fff",fontWeight:800,fontSize:13,
+                        textAlign:"center",borderRight:"1px solid rgba(255,255,255,0.15)",whiteSpace:"nowrap"}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.filter(r=>r.dateStr.includes(`${MONTH_UPPER[today.getMonth()]} ${today.getFullYear()}`)).length===0&&!loading&&(
+                    <tr><td colSpan={9} style={{padding:"40px",textAlign:"center",color:"var(--text-secondary)"}}>
+                      {loadErr?"โหลดไม่สำเร็จ":`ไม่มีข้อมูลสำหรับเดือน ${MONTH_UPPER[today.getMonth()]} ${today.getFullYear()}`}
+                    </td></tr>
+                  )}
+                  {rows.filter(r=>r.dateStr.includes(`${MONTH_UPPER[today.getMonth()]} ${today.getFullYear()}`)).map((r,i)=>{
+                    const isToday = r.dateStr===todayStr;
+                    return (
+                      <tr key={i} style={{borderBottom:"1px solid var(--border-panel)",
+                        background:isToday?"rgba(56,189,248,0.12)":rowBg(r.dayFull),
+                        outline:isToday?"2px solid var(--accent-color)":"none"}}>
+                        <td style={{padding:"8px 6px",textAlign:"center",whiteSpace:"nowrap"}}>
+                          <span style={{background:DAY_CLR[r.dayFull]||"#3b82f6",color:"#fff",
+                            fontWeight:900,fontSize:11,padding:"3px 8px",borderRadius:5}}>
+                            {r.dayFull.slice(0,3)}
+                          </span>
+                          {isToday&&<span style={{marginLeft:5,fontSize:10,background:"var(--accent-color)",
+                            color:"#fff",borderRadius:3,padding:"1px 5px"}}>TODAY</span>}
+                        </td>
+                        <td style={{padding:"8px 6px",textAlign:"center",fontWeight:700,
+                          color:DAY_CLR[r.dayFull]||"var(--text-primary)",whiteSpace:"nowrap"}}>{r.dateStr.split(" ").slice(0,2).join(" ")}</td>
+                        <td style={{padding:"8px 6px",textAlign:"center",fontWeight:600,color:"var(--text-primary)",whiteSpace:"nowrap"}}>{r.alert||"—"}</td>
+                        <td style={{padding:"8px 6px",textAlign:"center",color:"var(--text-primary)",whiteSpace:"nowrap"}}>{r.sof||"—"}</td>
+                        <td style={{padding:"8px 6px",textAlign:"center",color:"var(--text-primary)",whiteSpace:"nowrap"}}>{r.baseops}</td>
+                        <td style={{padding:"8px 6px",textAlign:"center",color:"var(--text-primary)",whiteSpace:"nowrap"}}>{r.emerBrief||"—"}</td>
+                        <td style={{padding:"8px 6px",textAlign:"center",fontSize:13,color:"var(--text-primary)",whiteSpace:"nowrap"}}>{r.det9923||"—"}</td>
+                        <td style={{padding:"8px 6px",textAlign:"center",fontSize:13,color:"var(--text-primary)",whiteSpace:"nowrap"}}>{r.cSqdn||"—"}</td>
+                        <td style={{padding:"8px 6px",textAlign:"center",fontSize:13,
+                          color:r.remark?"#fca5a5":"var(--text-secondary)",
+                          fontWeight:r.remark?700:400}}>{r.remark||""}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function AcForm({init, isGroupA, onSave, onCancel}) {
   const [f,setF] = useState(JSON.parse(JSON.stringify(init)));
@@ -3554,9 +4314,8 @@ export default function App() {
   ];
 
   return (
-    <div style={{background:"var(--bg-app)",minHeight:"100vh",width:"100%",fontFamily:"'Sarabun',sans-serif",color:"var(--text-primary)",overflowX:"hidden",paddingBottom:isMobile?"85px":"20px"}}>
-      <div className="cyber-grid" />
-      <div className="hologram-overlay" />
+    <div style={{background:"var(--bg-app)",minHeight:"100vh",width:"100%",color:"var(--text-primary)",overflowX:"hidden",paddingBottom:isMobile?"85px":"20px"}}>
+      <div className="ambient-background" />
 
       {showPopup&&popupAnn.length>0&&(
         <SafetyPopup announcements={popupAnn} onClose={()=>setShowPopup(false)}/>
@@ -3584,14 +4343,18 @@ export default function App() {
             style={{background:"transparent",border:"none",color:"var(--text-secondary)",fontSize:22,cursor:"pointer",padding:4,
               minWidth:40,minHeight:40,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
         </div>
-        <div style={{flex:1,overflowY:"auto",padding:"12px 0"}}>
+        <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
           {TABS.map(t=>(
             <button key={t.id} onClick={()=>{setTab(t.id);setSideOpen(false);}}
-              style={{width:"100%",padding:isMobile?"24px 25px":"16px 25px",textAlign:"left",background:tab===t.id?"var(--glow-accent)":"transparent",
-                border:"none",cursor:"pointer",fontSize:isMobile?20:16,fontWeight:tab===t.id?700:400,
+              className="sidebar-tab-btn"
+              style={{
+                width:"100%",padding:isMobile?"18px 24px":"14px 20px",textAlign:"left",
+                background:tab===t.id?"var(--glow-accent)":"transparent",
+                border:"none",cursor:"pointer",fontSize:isMobile?18:15,
+                fontWeight:tab===t.id?700:500,
                 color:tab===t.id?"var(--accent-color)":"var(--text-secondary)",
-                borderLeft:tab===t.id?"4px solid var(--accent-color)":"4px solid transparent",
-                transition:"all 0.2s"}}>
+                borderLeft:tab===t.id?"4px solid var(--accent-color)":"4px solid transparent"
+              }}>
               {t.l}
             </button>
           ))}
@@ -3674,9 +4437,10 @@ export default function App() {
 
       {/* Bottom Navigation Bar สำหรับมือถือ */}
       {isMobile&&(
-        <div className="glass-panel" style={{position:"fixed",bottom:0,left:0,right:0,height:75,zIndex:999,
+        <div className="glass-panel" style={{position:"fixed",bottom:0,left:0,right:0,height:85,zIndex:999,
           borderTop:"1px solid var(--border-panel)",display:"grid",gridTemplateColumns:"repeat(5, 1fr)",
-          paddingBottom:"env(safe-area-inset-bottom)",borderRadius:"20px 20px 0 0"}}>
+          paddingBottom:"env(safe-area-inset-bottom)",borderRadius:"24px 24px 0 0",
+          boxShadow:"0 -10px 40px rgba(0,0,0,0.15)"}}>
           {MOBILE_TABS.map(t=>(
             <button key={t.id} onClick={()=>{
               if(t.id === "more") {
@@ -3686,9 +4450,10 @@ export default function App() {
               }
             }}
               style={{background:"transparent",border:"none",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
-                color:tab===t.id && t.id!=="more"?"var(--accent-color)":"var(--text-secondary)",cursor:"pointer"}}>
-              <span style={{fontSize:22,marginBottom:4}}>{t.icon}</span>
-              <span style={{fontSize:11,fontWeight:700}}>{t.id === "more" ? "เมนูอื่น" : t.l.split(" ")[1]}</span>
+                color:tab===t.id && t.id!=="more"?"var(--accent-color)":"var(--text-secondary)",cursor:"pointer",
+                paddingTop: 8}}>
+              <span style={{fontSize:24,marginBottom:6, transition:"transform 0.2s", transform:tab===t.id && t.id!=="more"?"scale(1.15) translateY(-2px)":"scale(1)"}}>{t.icon}</span>
+              <span style={{fontSize:11,fontWeight:tab===t.id && t.id!=="more"?700:500}}>{t.id === "more" ? "เมนูอื่น" : t.l.split(" ")[1]}</span>
             </button>
           ))}
         </div>
@@ -3735,14 +4500,20 @@ function DashboardContent() {
     });
     loadFromSheet("AIRCRAFT STATUS S-92A").then(rows=>{ if(rows.length>1)setListA(rows.slice(1).map(r=>({id:r[0]||"",status:r[1]||"FMC",trouble:r[6]||"",remark:r[13]||""}))); });
     loadFromSheet("AIRCRAFT STATUS S-70i").then(rows=>{ if(rows.length>1)setListB(rows.slice(1).map(r=>({id:r[0]||"",status:r[1]||"FMC",trouble:r[6]||"",remark:r[13]||""}))); });
-    loadFromSheet("DUTY").then(rows=>{ if(rows.length>1) setMonthly(rows.slice(1).map(r=>({date:r[1]||"",alert:r[2]||"",sof:r[3]||"",base:r[4]||""}))); });
+    loadDutySheetCSV().then(csv=>{
+      if(csv.length>1) {
+        const [,...data]=csv;
+        setMonthly(data.filter(r=>r.some(c=>c.trim()!=="")).map(parseDutyRowNew));
+      }
+    }).catch(()=>{});
     loadFromSheet("ORDERS").then(rows=>{ if(rows.length>1) setOrders(rows.slice(1,4).map(r=>({date:r[0]||"",items:(()=>{try{return JSON.parse(r[1]||"[]");}catch{return [r[1]||""];}})()}))); });
     loadFromSheet("HAZARD REPORT").then(rows=>{ if(rows.length>1) setHazards(rows.slice(1,4).map(r=>({date:r[0]||"",time:r[1]||"",reporter:r[2]||"",event:r[8]||""}))); });
     loadFromSheet("SAFETY ANNOUNCEMENTS").then(rows=>{ if(rows.length>1) setSafetyAnn(rows.slice(1).map(r=>({title:r[0]||"",body:r[1]||"",date:r[2]||"",imageUrl:parseDriveUrl(r[3]||"")}))); });
     loadNotamFromCSV().then(rows=>{
       if(rows.length>1){
-        const rawTexts = rows.slice(1).map(r => {
-          let val = r[8] || r[5];
+        const parsedRows = parseNotamRows(rows);
+        const rawTexts = parsedRows.map(r => {
+          let val = r.Raw_Text || r.Description || "";
           val = cleanRawText(val);
           if (val && !val.trim().startsWith("(")) {
             val = "(" + val.trim() + ")";
@@ -3759,10 +4530,10 @@ function DashboardContent() {
   const fmc    = allAc.filter(a=>a.status==="FMC").length;
   const nmc    = allAc.filter(a=>a.status==="NMC").length;
   const allN   = notams;
-  const hiN    = allN.filter((n:any)=>n.p==="HIGH").length;
+  const hiN    = allN.filter((n:any)=>n.p==="CRITICAL" || n.p==="HIGH").length;
   const today  = new Date();
-  const todStr = `${today.getDate()} ${MONTH_EN[today.getMonth()]}`;
-  const dutyRow= monthly.find(r=>r.date===todStr);
+  const todStr = `${today.getDate()} ${MONTH_UPPER[today.getMonth()]} ${today.getFullYear()}`;
+  const dutyRow= monthly.find(r=>r.dateStr===todStr);
 
   return (
     <div style={{width:"100%"}}>
@@ -3786,10 +4557,10 @@ function DashboardContent() {
         {/* 2. เวรประจำวัน */}
         <Sec title="เวรประจำวัน" icon="👮">
           {dutyRow ? (
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,padding:"6px 0"}}>
-              {[["ALERT 1",dutyRow.alert],["SOF",dutyRow.sof],["BASE OPS",dutyRow.base]].map(([l,v])=>(
-                <div key={l} style={{background:"var(--bg-card)",border:"1px solid var(--border-panel)",borderRadius:8,padding:"12px 15px"}}>
-                  <div style={{fontSize:12,color:"var(--accent-color)",fontWeight:700,marginBottom:5}}>{l}</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,padding:"6px 0"}}>
+              {[["ALERT 1",dutyRow.alert,"#ef4444"],["SOF",dutyRow.sof,"#f97316"],["BASE OPS.",dutyRow.baseops,"#06b6d4"],["EMER BRIEF",dutyRow.emerBrief,"#a855f7"]].map(([l,v,c])=>(
+                <div key={l} style={{background:"var(--bg-card)",border:"1px solid var(--border-panel)",borderLeft:`4px solid ${c}`,borderRadius:8,padding:"12px 15px"}}>
+                  <div style={{fontSize:11,color:c,fontWeight:800,marginBottom:5}}>{l}</div>
                   <div style={{fontSize:18,fontWeight:800,color:"var(--text-primary)"}}>{v||"—"}</div>
                 </div>
               ))}
@@ -3825,9 +4596,9 @@ function DashboardContent() {
         </Sec>
 
         {/* 6. NOTAM */}
-        <Sec title="NOTAM HIGH" icon="🚨">
-          {allN.filter((n:any)=>n.p==="HIGH").length===0&&<div style={{color:"var(--text-secondary)",fontSize:15,padding:"8px 0"}}>ไม่มี NOTAM HIGH</div>}
-          {allN.filter((n:any)=>n.p==="HIGH").map((n:any,i)=>(
+        <Sec title="NOTAM CRITICAL" icon="🚨">
+          {allN.filter((n:any)=>n.p==="CRITICAL" || n.p==="HIGH").length===0&&<div style={{color:"var(--text-secondary)",fontSize:15,padding:"8px 0"}}>ไม่มี NOTAM CRITICAL</div>}
+          {allN.filter((n:any)=>n.p==="CRITICAL" || n.p==="HIGH").map((n:any,i)=>(
             <div key={i} style={{padding:"7px 0 7px 10px",borderBottom:"1px solid var(--border-panel)",borderLeft:"3px solid #ef4444"}}>
               <div style={{fontFamily:"monospace",fontSize:14,fontWeight:800,color:"#38bdf8"}}>{n.raw.split("\n")[0]}</div>
               <div style={{fontFamily:"monospace",fontSize:12,color:"var(--text-secondary)",marginTop:2}}>{(n.raw.split("\n").find((l:string)=>l.trim().startsWith("E)"))||"").trim()}</div>

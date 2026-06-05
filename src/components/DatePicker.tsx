@@ -14,14 +14,17 @@ export default function DatePicker({ value, onChange, dark=true }: { value: stri
     if (parts.length >= 2) {
       const d = parseInt(parts[0]);
       const mIdx = MONTH_EN.findIndex(m => m.toLowerCase() === parts[1].toLowerCase());
-      if (!isNaN(d) && mIdx >= 0) return new Date(today.getFullYear(), mIdx, d);
+      if (!isNaN(d) && mIdx >= 0) {
+        const y = parts[2] ? parseInt(parts[2]) : today.getFullYear();
+        return new Date(y, mIdx, d);
+      }
     }
     return today;
   };
   
   const [cur, setCur] = useState(() => parseVal(value));
   const ref = useRef<HTMLDivElement>(null);
-
+  
   useEffect(() => {
     setCur(parseVal(value));
   }, [value]);
@@ -42,7 +45,7 @@ export default function DatePicker({ value, onChange, dark=true }: { value: stri
 
   const selectDate = (d: number) => {
     const picked = new Date(cur.getFullYear(), cur.getMonth(), d);
-    onChange(`${d} ${MONTH_EN[picked.getMonth()]}`);
+    onChange(`${d} ${MONTH_EN[picked.getMonth()]} ${picked.getFullYear()}`);
     setOpen(false);
   };
 
