@@ -2320,7 +2320,7 @@ function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)
       <Fragment key={rowIdx}>
         <tr
           onClick={()=>setExpandedRow(isExpanded?null:realIdx)}
-          style={{borderBottom:isExpanded?"none":"1px solid var(--border-panel)",background:rowBg,cursor:"pointer",transition:"background 0.15s",fontFamily:sf,fontWeight:500}}>
+          style={{height: 56, borderBottom:isExpanded?"none":"1px solid var(--border-panel)",background:rowBg,cursor:"pointer",transition:"background 0.15s",fontFamily:sf,fontWeight:500}}>
           <td style={{padding:0,width:0,border:"none"}}></td>
           <td style={{padding:"8px 5px",textAlign:"center"}}><span style={{background:dc,color:"#fff",fontWeight:800,fontSize:11,padding:"2px 6px",borderRadius:5}}>{f.day}</span></td>
           <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)"}}>{f.date ? f.date.split(" ").slice(0, 2).join(" ") : ""}</td>
