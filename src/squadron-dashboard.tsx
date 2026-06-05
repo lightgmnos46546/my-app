@@ -1827,21 +1827,21 @@ const DC: Record<string, string> = {
 };
 
 const COLS = [
-  { k: "day",      l: "DAY",       w: 38 },
-  { k: "date",     l: "DATE",      w: 50 },
-  { k: "acTypeF",  l: "TYPE",      w: 48 },
-  { k: "mission",  l: "MISSION",   w: 80 },
-  { k: "ac",       l: "A/C",       w: 32 },
-  { k: "cs",       l: "C/S",       w: 62 },
-  { k: "pilot",    l: "PILOT",     w: 55 },
-  { k: "coPilot",  l: "CO-PILOT",  w: 55 },
-  { k: "takeoff",  l: "T/O",       w: 38 },
-  { k: "land",     l: "L/D",       w: 38 },
-  { k: "route",    l: "ROUTE",     w: 72 },
-  { k: "altitude", l: "ALT",       w: 48 },
-  { k: "fuel",     l: "FUEL",      w: 40 },
-  { k: "remark",   l: "REMARK",    w: 82 },
-  { k: "sq",       l: "SQ.",       w: 32 }
+  { k: "day",      l: "DAY",       w: 45 },
+  { k: "date",     l: "DATE",      w: 60 },
+  { k: "acTypeF",  l: "TYPE",      w: 60 },
+  { k: "mission",  l: "MISSION",   w: 120 },
+  { k: "ac",       l: "A/C",       w: 45 },
+  { k: "cs",       l: "C/S",       w: 80 },
+  { k: "pilot",    l: "PILOT",     w: 100 },
+  { k: "coPilot",  l: "CO-PILOT",  w: 100 },
+  { k: "takeoff",  l: "T/O",       w: 50 },
+  { k: "land",     l: "L/D",       w: 50 },
+  { k: "route",    l: "ROUTE",     w: 110 },
+  { k: "altitude", l: "ALT",       w: 60 },
+  { k: "fuel",     l: "FUEL",      w: 50 },
+  { k: "remark",   l: "REMARK",    w: 140 },
+  { k: "sq",       l: "SQ.",       w: 45 }
 ];
 
 function formatMissionText(val: string, align: "center" | "left" = "center") {
