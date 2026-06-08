@@ -5212,8 +5212,8 @@ function PostFlightTab() {
   useEffect(() => {
     Promise.all([
       loadFromSheet("POST FLIGHT LOGS"),
-      loadFromSheet("PILOTS S-92A"),
-      loadFromSheet("PILOTS S-70i")
+      loadFromSheet("PILOTS S-92A FOR POSTFLIGHT"),
+      loadFromSheet("PILOTS S-70i FOR POSTFLIGHT")
     ]).then(([pfRows, pA, pB]) => {
       if(pfRows.length > 1) {
         const fmtTime = (t) => {
