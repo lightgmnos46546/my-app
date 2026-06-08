@@ -4749,6 +4749,19 @@ function PostFlightTab() {
   const [editFlight, setEditFlight] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [view, setView] = useState("log"); // log or hours
+  const [viewDate, setViewDate] = useState(new Date());
+
+  const parseDateStrHelper = (s) => {
+    if (!s) return null;
+    const clean = s.replace(/^[ก-๙a-zA-Z\s]+,\s*/, "").trim();
+    const p = clean.split(/\s+/);
+    if (p.length < 2) return null;
+    const d = parseInt(p[0]);
+    const m = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"].findIndex(x=>x.toLowerCase()===p[1].toLowerCase());
+    if (isNaN(d)||m<0) return null;
+    const y = p[2] ? parseInt(p[2]) : new Date().getFullYear();
+    return new Date(y, m, d);
+  };
 
   useEffect(() => {
     Promise.all([
@@ -4771,7 +4784,7 @@ function PostFlightTab() {
         })));
       }
       
-      const parseP = (rows) => rows.length > 1 ? rows.slice(1).map(r=>({rank:r[0]||"",name:r[1]||"",nickname:r[2]||"",initial:r[3]||"",callsign:r[4]||"",tel:r[5]||"",acType:r[6]||"S-70i",classNum:r[7]||""})) : [];
+      const parseP = (rows) => rows.length > 1 ? rows.slice(1).map(r=>({rank:r[0]||"",name:r[1]||"",nickname:r[2]||"",initial:r[3]||"",callsign:r[4]||"",tel:r[5]||"",acType:r[6]||"S-70i",classNum:r[7]||"",baseHrs:r[8]||"0"})) : [];
       setPilots([...parseP(pA), ...parseP(pB)]);
       setReady(true);
     }).catch(console.error);
@@ -4795,6 +4808,101 @@ function PostFlightTab() {
     setSyncing(false);
   };
 
+  const renderGridTable = (acType, typePilots) => {
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    const weeks = [
+      { label: "Week 1", days: [1,2,3,4,5,6,7] },
+      { label: "Week 2", days: [8,9,10,11,12,13,14] },
+      { label: "Week 3", days: [15,16,17,18,19,20,21] },
+      { label: "Week 4", days: [22,23,24,25,26,27,28] },
+    ];
+    if (daysInMonth > 28) {
+      const w5 = [];
+      for(let d=29; d<=daysInMonth; d++) w5.push(d);
+      weeks.push({ label: "Week 5", days: w5 });
+    }
+
+    return (
+      <div style={{overflowX:"auto",background:"#0f172a",borderRadius:12,border:"1px solid var(--border-panel)",paddingBottom:10,marginBottom:30}}>
+        <div style={{padding:"10px 15px",background:"var(--bg-accent)",borderBottom:"1px solid var(--border-panel)",fontWeight:800,color:acType==="S-92A"?"#a5b4fc":"#6ee7b7",display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:18}}>✈️</span> {acType} (จำนวนนักบิน {typePilots.length} นาย)
+        </div>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:1200}}>
+          <thead>
+            <tr style={{background:"var(--bg-panel)"}}>
+              <th rowSpan={2} style={{padding:"8px",color:"var(--text-secondary)",fontSize:12,borderRight:"1px solid var(--border-panel)",borderBottom:"1px solid var(--border-panel)"}}>ลำดับ</th>
+              <th rowSpan={2} style={{padding:"8px",color:"var(--text-secondary)",fontSize:12,borderRight:"1px solid var(--border-panel)",borderBottom:"1px solid var(--border-panel)",textAlign:"left"}}>ยศ - ชื่อ - นามสกุล</th>
+              <th rowSpan={2} style={{padding:"8px",color:"var(--text-secondary)",fontSize:12,borderRight:"1px solid #334155",borderBottom:"1px solid var(--border-panel)"}}>ณ ต้นเดือน</th>
+              {weeks.map((w,i) => (
+                <th key={i} colSpan={w.days.length} style={{padding:"4px",color:"var(--text-secondary)",fontSize:11,borderRight:i<weeks.length-1?"1px solid #334155":"1px solid var(--border-panel)",borderBottom:"1px solid var(--border-panel)",textAlign:"center",background:i%2===0?"rgba(255,255,255,0.02)":"transparent"}}>{w.label}</th>
+              ))}
+              <th rowSpan={2} style={{padding:"8px",color:"#fbbf24",fontSize:12,borderBottom:"1px solid var(--border-panel)"}}>ยอดบินรวม</th>
+            </tr>
+            <tr style={{background:"var(--bg-panel)"}}>
+              {weeks.map((w,wi) => (
+                w.days.map((d,di) => (
+                  <th key={d} style={{padding:"4px 2px",color:"#94a3b8",fontSize:10,borderRight:(di===w.days.length-1 && wi!==weeks.length-1)?"1px solid #334155":"none",borderBottom:"1px solid var(--border-panel)",textAlign:"center",minWidth:22,background:wi%2===0?"rgba(255,255,255,0.02)":"transparent"}}>{d}</th>
+                ))
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {typePilots.map((p,i) => {
+              const baseHrs = parseFloat(p.baseHrs) || 0;
+              
+              const pilotLogs = logs.filter(l => {
+                if(!l.date) return false;
+                const pd = parseDateStrHelper(l.date);
+                if(!pd) return false;
+                if(pd.getFullYear() !== year || pd.getMonth() !== month) return false;
+                
+                return ((l.pilot && l.pilot.toUpperCase().includes(p.callsign.toUpperCase())) ||
+                        (l.copilot && l.copilot.toUpperCase().includes(p.callsign.toUpperCase())));
+              });
+
+              const dailyHrs = {};
+              pilotLogs.forEach(l => {
+                const pd = parseDateStrHelper(l.date);
+                if(pd) {
+                  const d = pd.getDate();
+                  dailyHrs[d] = (dailyHrs[d] || 0) + (parseFloat(l.hrs)||0);
+                }
+              });
+
+              const monthTotal = pilotLogs.reduce((s,l)=>s+(parseFloat(l.hrs)||0), 0);
+              const grandTotal = baseHrs + monthTotal;
+
+              return (
+                <tr key={i} style={{borderBottom:"1px solid var(--border-panel)"}}>
+                  <td style={{padding:"8px",textAlign:"center",color:"var(--text-secondary)",borderRight:"1px solid var(--border-panel)",fontSize:12}}>{i+1}</td>
+                  <td style={{padding:"8px",color:"#f8fafc",borderRight:"1px solid var(--border-panel)",fontWeight:600,fontSize:13}}>{p.rank} {p.name} <span style={{color:"var(--text-secondary)",fontSize:11,marginLeft:5}}>({p.callsign})</span></td>
+                  <td style={{padding:"8px",textAlign:"center",color:"#94a3b8",borderRight:"1px solid #334155",fontWeight:700,fontSize:13}}>{baseHrs>0?baseHrs.toFixed(1):"-"}</td>
+                  
+                  {weeks.map((w,wi) => (
+                    w.days.map((d,di) => {
+                      const dh = dailyHrs[d];
+                      return (
+                        <td key={d} style={{padding:"4px 2px",textAlign:"center",color:dh>0?"#38bdf8":"#475569",fontSize:12,fontWeight:dh>0?800:400,borderRight:(di===w.days.length-1 && wi!==weeks.length-1)?"1px solid #334155":"none",background:wi%2===0?"rgba(255,255,255,0.01)":"transparent"}}>
+                          {dh > 0 ? dh.toFixed(1) : "."}
+                        </td>
+                      );
+                    })
+                  ))}
+
+                  <td style={{padding:"8px",textAlign:"center",color:grandTotal>0?"#fbbf24":"var(--text-secondary)",fontWeight:800,fontSize:14}}>{grandTotal>0?grandTotal.toFixed(1):"-"}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  const MONTH_EN = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
@@ -4875,7 +4983,6 @@ function PostFlightTab() {
                       <button onClick={()=>setEditFlight({log:l, idx:i})} style={{padding:"4px 8px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:4,marginRight:5,cursor:"pointer",fontWeight:700,fontSize:12}}>✏️ แก้ไข</button>
                       <button onClick={()=>handleDeleteLog(i)} style={{padding:"4px 8px",background:"#ef4444",color:"#fff",border:"none",borderRadius:4,cursor:"pointer",fontWeight:700,fontSize:12}}>🗑️ ลบ</button>
                     </td>
-
                   </tr>
                 ))}
               </tbody>
@@ -4886,46 +4993,23 @@ function PostFlightTab() {
 
       {view === "hours" && (
         <div className="glass-panel">
-          <div style={{padding:"15px 20px",borderBottom:"1px solid var(--border-panel)",fontWeight:800,fontSize:16,color:"#e879f9"}}>📊 สรุปชั่วโมงบินนักบิน (แยกตามเครื่อง)</div>
-          <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",minWidth:1000}}>
-              <thead>
-                <tr style={{background:"var(--bg-accent)"}}>
-                  <th style={{padding:"10px",textAlign:"center",color:"var(--text-secondary)",fontSize:12,borderRight:"1px solid var(--border-panel)"}}>ลำดับ</th>
-                  <th style={{padding:"10px",textAlign:"left",color:"var(--text-secondary)",fontSize:12,borderRight:"1px solid var(--border-panel)"}}>ยศ - ชื่อ - สกุล</th>
-                  <th style={{padding:"10px",textAlign:"center",color:"var(--text-secondary)",fontSize:12}}>Callsign</th>
-                  <th style={{padding:"10px",textAlign:"center",color:"var(--text-secondary)",fontSize:12}}>Type</th>
-                  <th style={{padding:"10px",textAlign:"center",color:"#fbbf24",fontSize:13}}>ยอดบินรวม (Hrs)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pilots.map((p,i)=>{
-                  // คำนวณชั่วโมงบินของนักบินคนนี้ จาก Logs
-                  // crew string "SHARK / VIPER"
-                  const pilotHrs = logs.reduce((sum, l) => {
-                    if((l.pilot && l.pilot.toUpperCase().includes(p.callsign.toUpperCase())) ||
-                       (l.copilot && l.copilot.toUpperCase().includes(p.callsign.toUpperCase()))) {
-                      return sum + (parseFloat(l.hrs)||0);
-                    }
-                    return sum;
-                  }, 0);
-                  
-                  return (
-                    <tr key={i} style={{borderBottom:"1px solid var(--border-panel)"}}>
-                      <td style={{padding:"10px",textAlign:"center",color:"var(--text-secondary)",borderRight:"1px solid var(--border-panel)"}}>{i+1}</td>
-                      <td style={{padding:"10px",color:"#f8fafc",borderRight:"1px solid var(--border-panel)",fontWeight:600}}>{p.rank} {p.name}</td>
-                      <td style={{padding:"10px",textAlign:"center",color:"#38bdf8",fontFamily:"monospace",fontWeight:800}}>{p.callsign}</td>
-                      <td style={{padding:"10px",textAlign:"center"}}>
-                        <span style={{background:p.acType==="S-92A"?"#312e81":"#064e3b",color:p.acType==="S-92A"?"#a5b4fc":"#6ee7b7",padding:"2px 8px",borderRadius:4,fontSize:12,fontWeight:700}}>{p.acType}</span>
-                      </td>
-                      <td style={{padding:"10px",textAlign:"center",fontWeight:800,fontSize:16,color:pilotHrs>0?"#fbbf24":"var(--text-secondary)"}}>{pilotHrs > 0 ? pilotHrs.toFixed(1) : "-"}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+          <div style={{padding:"15px 20px",borderBottom:"1px solid var(--border-panel)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+             <div style={{fontWeight:800,fontSize:16,color:"#e879f9"}}>📊 สรุปชั่วโมงบินนักบิน (แยกตามเครื่อง)</div>
+             <div style={{display:"flex",gap:15,alignItems:"center",background:"var(--bg-accent)",padding:"5px 15px",borderRadius:20,border:"1px solid var(--border-panel)"}}>
+               <button onClick={()=>setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth()-1, 1))} style={{background:"transparent",border:"none",color:"var(--text-secondary)",cursor:"pointer",fontSize:16}}>◀</button>
+               <span style={{fontWeight:800,color:"#fff",minWidth:100,textAlign:"center"}}>{MONTH_EN[viewDate.getMonth()]} {viewDate.getFullYear()}</span>
+               <button onClick={()=>setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth()+1, 1))} style={{background:"transparent",border:"none",color:"var(--text-secondary)",cursor:"pointer",fontSize:16}}>▶</button>
+             </div>
           </div>
-          <div style={{padding:15,color:"var(--text-secondary)",fontSize:12}}>* การคำนวณชั่วโมงบินรวมดึงจาก Post Flight Logs โดยจับคู่จากคำในช่อง Crew และ Callsign</div>
+          <div style={{padding:20}}>
+            {renderGridTable("S-92A", pilots.filter(p=>p.acType==="S-92A"))}
+            {renderGridTable("S-70i", pilots.filter(p=>p.acType==="S-70i"))}
+            
+            <div style={{marginTop:10,color:"var(--text-secondary)",fontSize:12}}>
+              * สรุปชั่วโมงบินรายวันอ้างอิงข้อมูลจาก Post Flight Log ของเดือนที่เลือก<br/>
+              * ยอดบินรวมคำนวณจากยอดสะสม ณ ต้นเดือน (ระบุได้ในคอลัมน์ I ของ Sheet รายชื่อนักบิน) รวมกับชั่วโมงที่บินจริงในแต่ละวันของเดือน
+            </div>
+          </div>
         </div>
       )}
     </div>
