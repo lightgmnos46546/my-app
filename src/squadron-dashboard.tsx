@@ -1668,14 +1668,14 @@ function PilotTab() {
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:16}}>
               <thead>
                 <tr style={{background:"#1e3a5f"}}>
-                  {["","#","ยศ","ชื่อ-นามสกุล","ชื่อเล่น","ชื่อย่อ","Callsign","เบอร์โทร","Type A/C","รุ่น ชนอ."].map(h=>(
+                  {["","ยศ","ชื่อ-นามสกุล","ชื่อเล่น","ชื่อย่อ","Callsign","เบอร์โทร","Type A/C","รุ่น ชนอ."].map(h=>(
                     <th key={h} style={{padding:"12px 15px",color:"#fff",fontWeight:800,fontSize:15,textAlign:"center",borderRight:"1px solid #1e40af"}}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered2.length===0 && (
-                  <tr><td colSpan={10} style={{padding:"40px",textAlign:"center",color:"#94a3b8",fontSize:16}}>
+                  <tr><td colSpan={9} style={{padding:"40px",textAlign:"center",color:"#94a3b8",fontSize:16}}>
                     {search ? "ไม่พบชื่อที่ค้นหา" : acFilter==="all" ? "ยังไม่มีรายชื่อ กด '+ เพิ่ม Pilot' เพื่อเริ่มต้น" : `ยังไม่มีรายชื่อนักบิน ${acFilter}`}
                   </td></tr>
                 )}
@@ -1697,7 +1697,7 @@ function PilotTab() {
                       }}
                       style={{borderBottom:"1px solid #e2e8f0",background:isDragging?"#dbeafe":isOver?"#eff6ff":fi%2===0?"#fff":"#f9fafb",opacity:isDragging?0.5:1,borderTop:isOver?"2px solid #3b82f6":"",cursor:"pointer",transition:"background 0.2s"}}>
                       <td style={{padding:"7px 4px",textAlign:"center",color:"#cbd5e1",fontSize:20,userSelect:"none"}}>⠿</td>
-                      <td style={{padding:"12px 15px",textAlign:"center",color:"#94a3b8",fontSize:14}}>{realIdx+1}</td>
+                      
                       <td style={{padding:"12px 15px",textAlign:"center",fontWeight:700,color:"#374151",fontSize:15}}>{p.rank}</td>
                       <td style={{padding:"12px 15px",fontWeight:600,color:"#1e293b"}}>{p.name}</td>
                       <td style={{padding:"12px 15px",textAlign:"center",color:"#64748b",fontSize:14}}>{p.nickname||"—"}</td>
@@ -1716,7 +1716,7 @@ function PilotTab() {
                     </tr>
                     {mode === realIdx && (
                       <tr>
-                        <td colSpan={10} style={{padding:0}}>
+                        <td colSpan={9} style={{padding:0}}>
                           <div style={{background:"#0f2040",padding:"20px",boxShadow:"inset 0 4px 8px rgba(0,0,0,0.3)",cursor:"default"}}>
                             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:15}}>
                               <div style={{fontWeight:700,color:"#60a5fa",fontSize:16}}>
