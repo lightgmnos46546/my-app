@@ -4671,42 +4671,7 @@ function DashboardContent() {
   const [postFlights, setPostFlights] = useCachedState<any[]>("dash_postFlights", []);
 
 
-  useEffect(()=>{
-    const today=new Date();
-    const todayStr=`${today.getDate()} ${MONTH_EN[today.getMonth()]}`;
-    loadFromSheet("FLIGHT SCHEDULE").then(rows=>{
-      if(rows.length>1){
-        const [,...data]=rows;
-        setFlights(data.map(r=>({date:r[1]||"",acTypeF:r[2]||"",mission:r[3]||"",ac:r[4]||"",cs:r[5]||"",pilot:r[6]||"",coPilot:r[7]||"",takeoff:r[8]||"",land:r[9]||"",route:r[10]||""})).filter(f=>f.date===todayStr));
-      }
-    });
-    loadFromSheet("AIRCRAFT STATUS S-92A").then(rows=>{ if(rows.length>1)setListA(rows.slice(1).map(r=>({id:r[0]||"",status:r[1]||"FMC",trouble:r[6]||"",remark:r[13]||""}))); });
-    loadFromSheet("AIRCRAFT STATUS S-70i").then(rows=>{ if(rows.length>1)setListB(rows.slice(1).map(r=>({id:r[0]||"",status:r[1]||"FMC",trouble:r[6]||"",remark:r[13]||""}))); });
-    loadDutySheetCSV().then(csv=>{
-      if(csv.length>1) {
-        const [,...data]=csv;
-        setMonthly(data.filter(r=>r.some(c=>c.trim()!=="")).map(parseDutyRowNew));
-      }
-    }).catch(()=>{});
-    loadFromSheet("ORDERS").then(rows=>{ if(rows.length>1) setOrders(rows.slice(1,4).map(r=>({date:r[0]||"",items:(()=>{try{return JSON.parse(r[1]||"[]");}catch{return [r[1]||""];}})()}))); });
-    loadFromSheet("HAZARD REPORT").then(rows=>{ if(rows.length>1) setHazards(rows.slice(1,4).map(r=>({date:r[0]||"",time:r[1]||"",reporter:r[2]||"",event:r[8]||""}))); });
-    loadFromSheet("SAFETY ANNOUNCEMENTS").then(rows=>{ if(rows.length>1) setSafetyAnn(rows.slice(1).map(r=>({title:r[0]||"",body:r[1]||"",date:r[2]||"",imageUrl:parseDriveUrl(r[3]||"")}))); });
-    loadNotamFromCSV().then(rows=>{
-      if(rows.length>1){
-        const parsedRows = parseNotamRows(rows);
-        const rawTexts = parsedRows.map(r => {
-          let val = r.Raw_Text || r.Description || "";
-          val = cleanRawText(val);
-          if (val && !val.trim().startsWith("(")) {
-            val = "(" + val.trim() + ")";
-          }
-          return val;
-        }).filter(Boolean).join("\n\n");
-        const parsed = parseNotamText(rawTexts);
-        if(parsed.length>0) setNotams(parsed);
-      }
-    }).catch(()=>{});
-  },[]);
+  useEffect(() => { /* Dashboard disabled */ }, []);
 
   const allAc  = [...listA,...listB];
   const fmc    = allAc.filter(a=>a.status==="FMC").length;
