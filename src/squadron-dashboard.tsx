@@ -2137,13 +2137,13 @@ function useIsMobile() {
 
 function FlightForm({init, onSave, onCancel, onDateChange=null}) {
   const [f, setF] = useState(init || EMPTY_FLIGHT);
-  const [pilots, setPilots] = useState([]);
+  const [pilots, setPilots] = useCachedState<any[]>("tab_pilots_flightform", []);
 
   // โหลดรายชื่อ pilot
   useEffect(() => {
     Promise.all([
-      loadFromSheet("PILOTS S-92A FOR DATA"),
-      loadFromSheet("PILOTS S-70i FOR DATA"),
+      loadFromSheet("PILOTS S-92A FOR FLIGHT SCHEDULE"),
+      loadFromSheet("PILOTS S-70i FOR FLIGHT SCHEDULE"),
     ]).then(([rowsA, rowsB]) => {
       const parse = (rows) => rows.length > 1
         ? rows.slice(1).map(r=>({rank:r[0]||"",name:r[1]||"",initial:r[2]||"",callsign:r[3]||"",tel:r[4]||"",acType:r[5]||"",classNum:r[6]||""}))
