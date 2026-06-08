@@ -4401,6 +4401,7 @@ export default function App() {
     {id:"calendar",  l:"📅 ตารางปฏิบัติ"},
     {id:"safety",    l:"🛡️ FLIGHT SAFETY"},
     {id:"order",     l:"📋 บันทึก/สั่งการ"},
+    {id:"weather",   l:"🌤️ TAF/METAR สนามบิน"},
   ];
 
   // Bottom Navigation สำหรับมือถือ
@@ -4571,6 +4572,7 @@ export default function App() {
         {tab==="calendar" &&<CalendarTab/>}
         {tab==="safety"   &&<SafetyTab prefill={safetyPrefill} onClearPrefill={()=>setSafetyPrefill(null)}/>}
         {tab==="order"    &&<OrderTab/>}
+        {tab==="weather"  &&<WeatherTab/>}
         <div style={{textAlign:"center",color:"#1e3a5f",fontSize:12,marginTop:20,letterSpacing:1}}>
           201 SQUADRON MANAGEMENT SYSTEM · PROTOTYPE
         </div>
@@ -5078,6 +5080,132 @@ function PostFlightTab() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ── Weather Tab ─────────────────────────────────────────────────────────────────
+function WeatherTab() {
+  const [metar, setMetar] = useState<any[]>([]);
+  const [taf, setTaf] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string|null>(null);
+  const [search, setSearch] = useState("");
+
+  const fetchData = () => {
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      fetch('https://weather.rtaf.mi.th/api/v1/metar/desktop/getMetarAllStationJSON', { method: 'POST' })
+        .then(res => res.text())
+        .then(txt => {
+          const d = JSON.parse(txt.trim());
+          return (d.CURRENT_WEATHER || []).filter(s => s.STATION_NAME && s.STATION_NAME !== '-' && s.METAR && s.METAR !== 'NIL');
+        }),
+      fetch('https://weather.rtaf.mi.th/api/v1/taf/desktop/getTafJSON', { method: 'POST' })
+        .then(res => res.text())
+        .then(txt => {
+          const d = JSON.parse(txt.trim());
+          return (d.currentTaf || []).filter(s => s.stationCode && s.stationName && s.stationName !== '-' && s.main && s.main.tafString);
+        })
+    ]).then(([mList, tList]) => {
+      setMetar(mList);
+      setTaf(tList);
+      setLoading(false);
+    }).catch(e => {
+      console.error("CORS Blocked หรือ API มีปัญหา", e);
+      setError("ไม่สามารถดึงข้อมูลสภาพอากาศได้ (อาจติดปัญหา CORS หรือ Server ไม่ตอบสนอง)");
+      setLoading(false);
+    });
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const combined = [];
+  const map:any = {};
+  metar.forEach(m => {
+    map[m.STATION_CODE] = { 
+      code: m.STATION_CODE, 
+      name: m.STATION_NAME, 
+      color: m.STATION_COLOR_NAME, 
+      metar: m.METAR, 
+      taf: "" 
+    };
+  });
+  taf.forEach(t => {
+    if (!map[t.stationCode]) {
+      map[t.stationCode] = { code: t.stationCode, name: t.stationName, color: "", metar: "", taf: t.main.tafString };
+    } else {
+      map[t.stationCode].taf = t.main.tafString;
+    }
+  });
+
+  const list:any[] = Object.values(map);
+  const shown = list.filter(item => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (item.code.toLowerCase().includes(q) || item.name.toLowerCase().includes(q));
+  });
+
+  shown.sort((a,b) => a.code.localeCompare(b.code));
+
+  return (
+    <div>
+      <div style={{background:"linear-gradient(180deg,#1e3a5f,#0f2040)",borderRadius:"10px 10px 0 0",padding:"18px 25px",display:"flex",alignItems:"center",gap:15,flexWrap:"wrap"}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:1}}>🌤️ ข้อมูลสภาพอากาศ (TAF/METAR)</div>
+          <div style={{fontSize:14,color:"#60a5fa"}}>ดึงข้อมูลเรียลไทม์จากกรมอุตุนิยมวิทยาการบิน กองทัพอากาศ</div>
+        </div>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 ค้นหาสนามบิน (เช่น VTBD)" style={{background:"#0f172a",border:"1px solid #334155",color:"#e2e8f0",borderRadius:8,padding:"8px 15px",fontSize:15,width:300}}/>
+        <button onClick={fetchData} style={{background:"#2563eb",border:"none",color:"#fff",borderRadius:9,padding:"9px 20px",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+          🔄 อัปเดตข้อมูล
+        </button>
+      </div>
+
+      <div style={{background:"#fff",borderRadius:"0 0 10px 10px",overflow:"hidden",border:"1px solid #e2e8f0"}}>
+        {loading && <div style={{padding:40,textAlign:"center",color:"#94a3b8",fontSize:16}}>กำลังโหลดข้อมูลสภาพอากาศ...</div>}
+        {error && <div style={{padding:40,textAlign:"center",color:"#ef4444",fontSize:16}}>{error}</div>}
+        {!loading && !error && (
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:16}}>
+            <thead>
+              <tr style={{background:"#f8fafc"}}>
+                <th style={{padding:"12px 15px",borderBottom:"2px solid #e2e8f0",textAlign:"left",color:"#475569"}}>สนามบิน</th>
+                <th style={{padding:"12px 15px",borderBottom:"2px solid #e2e8f0",textAlign:"center",color:"#475569"}}>สภาวะ</th>
+                <th style={{padding:"12px 15px",borderBottom:"2px solid #e2e8f0",textAlign:"left",color:"#475569"}}>METAR (สภาพอากาศปัจจุบัน)</th>
+                <th style={{padding:"12px 15px",borderBottom:"2px solid #e2e8f0",textAlign:"left",color:"#475569"}}>TAF (พยากรณ์อากาศล่วงหน้า)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((item,i) => {
+                let colorBg = "#f1f5f9";
+                let colorText = "#64748b";
+                if (item.color === "VFR") { colorBg = "#dcfce7"; colorText = "#166534"; }
+                else if (item.color === "MVFR") { colorBg = "#dbeafe"; colorText = "#1e40af"; }
+                else if (item.color === "IFR") { colorBg = "#fee2e2"; colorText = "#991b1b"; }
+                else if (item.color === "LIFR") { colorBg = "#fce7f3"; colorText = "#be185d"; }
+                
+                return (
+                  <tr key={i} style={{borderBottom:"1px solid #e2e8f0"}}>
+                    <td style={{padding:"15px",verticalAlign:"top"}}>
+                      <div style={{fontWeight:800,color:"#1e293b",fontSize:16}}>{item.code}</div>
+                      <div style={{color:"#64748b",fontSize:13}}>{item.name}</div>
+                    </td>
+                    <td style={{padding:"15px",verticalAlign:"top",textAlign:"center"}}>
+                      {item.color ? <span style={{background:colorBg,color:colorText,padding:"4px 10px",borderRadius:6,fontWeight:800,fontSize:14}}>{item.color}</span> : "-"}
+                    </td>
+                    <td style={{padding:"15px",verticalAlign:"top",fontFamily:"monospace",color:"#0f172a",fontSize:15,whiteSpace:"pre-wrap",lineHeight:1.4}}>{item.metar||"NIL"}</td>
+                    <td style={{padding:"15px",verticalAlign:"top",fontFamily:"monospace",color:"#334155",fontSize:14,whiteSpace:"pre-wrap",lineHeight:1.4}}>{item.taf||"NIL"}</td>
+                  </tr>
+                );
+              })}
+              {shown.length===0 && <tr><td colSpan={4} style={{padding:40,textAlign:"center",color:"#94a3b8"}}>ไม่พบข้อมูล</td></tr>}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }
