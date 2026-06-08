@@ -4674,7 +4674,7 @@ function DashboardContent() {
 function PostFlightModal({ flight, onSave, onCancel }: { flight: any, onSave: (data:any)=>void, onCancel: ()=>void }) {
   const [to, setTo] = useState(flight.takeoff || "");
   const [ld, setLd] = useState(flight.land || "");
-  const [discrepancy, setDiscrepancy] = useState("");
+  const [discrepancy, setDiscrepancy] = useState(flight.discrepancy || "");
 
   // Calculate Hrs
   let hrs = "0.0";
@@ -4746,6 +4746,8 @@ function PostFlightTab() {
   const [logs, setLogs] = useState([]);
   const [pilots, setPilots] = useState([]);
   const [ready, setReady] = useState(false);
+  const [editFlight, setEditFlight] = useState(null);
+  const [syncing, setSyncing] = useState(false);
   const [view, setView] = useState("log"); // log or hours
 
   useEffect(() => {
@@ -4780,8 +4782,51 @@ function PostFlightTab() {
   const totalHrs = logs.reduce((sum, l) => sum + (parseFloat(l.hrs)||0), 0).toFixed(1);
   const totalLdg = logs.reduce((sum, l) => sum + (parseInt(l.ldg)||0), 0);
 
+  const handleDeleteLog = async (idx) => {
+    if(!confirm("ต้องการลบข้อมูลนี้ใช่หรือไม่?")) return;
+    const next = logs.filter((_, i) => i !== idx);
+    setLogs(next);
+    setSyncing(true);
+    const allRows = [
+      ["DAY","DATE","TYPE","MISSION","A/C","C/S","PILOT","CO-PILOT","T/O","L/D","HRS","DISCREPANCY"],
+      ...next.map(n => [n.day, n.date, n.type, n.mission, n.ac, n.cs, n.pilot, n.copilot, n.to, n.ld, n.hrs, n.discrepancy])
+    ];
+    await saveToSheet("POST FLIGHT LOGS", allRows);
+    setSyncing(false);
+  };
+
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      
+      {syncing && <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{background:"#fff",padding:"10px 20px",borderRadius:8,color:"#000",fontWeight:800}}>กำลังบันทึกข้อมูล...</div></div>}
+      
+      {editFlight && (
+        <PostFlightModal 
+          flight={{
+            ...editFlight.log,
+            takeoff: editFlight.log.to,
+            land: editFlight.log.ld,
+            acType: editFlight.log.type,
+            coPilot: editFlight.log.copilot
+          }} 
+          onSave={async (pfData) => {
+            const next = [...logs];
+            next[editFlight.idx] = { ...editFlight.log, ...pfData };
+            setLogs(next);
+            setSyncing(true);
+            const allRows = [
+              ["DAY","DATE","TYPE","MISSION","A/C","C/S","PILOT","CO-PILOT","T/O","L/D","HRS","DISCREPANCY"],
+              ...next.map(n => [n.day, n.date, n.type, n.mission, n.ac, n.cs, n.pilot, n.copilot, n.to, n.ld, n.hrs, n.discrepancy])
+            ];
+            await saveToSheet("POST FLIGHT LOGS", allRows);
+            setSyncing(false);
+            setEditFlight(null);
+          }} 
+          onCancel={()=>setEditFlight(null)} 
+        />
+      )}
+
       {/* Summary Cards */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:15}}>
         <div className="glass-panel" style={{padding:20,borderLeft:"4px solid #8b5cf6"}}>
@@ -4807,11 +4852,11 @@ function PostFlightTab() {
             <table style={{width:"100%",borderCollapse:"collapse"}}>
               <thead>
                 <tr style={{background:"var(--bg-accent)"}}>
-                  {["DAY","DATE","TYPE","MISSION","A/C","C/S","PILOT","CO-PILOT","T/O","L/D","ชม.บิน","ข้อขัดข้อง"].map(h=><th key={h} style={{padding:"12px 15px",color:"var(--text-secondary)",fontSize:12,textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>)}
+                  {["DAY","DATE","TYPE","MISSION","A/C","C/S","PILOT","CO-PILOT","T/O","L/D","ชม.บิน","ข้อขัดข้อง","จัดการ"].map(h=><th key={h} style={{padding:"12px 15px",color:"var(--text-secondary)",fontSize:12,textAlign:"center",whiteSpace:"nowrap"}}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {logs.length===0&&<tr><td colSpan={11} style={{textAlign:"center",padding:30,color:"var(--text-secondary)"}}>ยังไม่มีข้อมูล Post Flight</td></tr>}
+                {logs.length===0&&<tr><td colSpan={13} style={{textAlign:"center",padding:30,color:"var(--text-secondary)"}}>ยังไม่มีข้อมูล Post Flight</td></tr>}
                 {logs.map((l,i)=>(
                   <tr key={i} style={{borderBottom:"1px solid var(--border-panel)"}}>
                     <td style={{padding:"12px 15px",color:"#fbbf24",fontWeight:700}}>{l.day}</td>
@@ -4826,6 +4871,11 @@ function PostFlightTab() {
                     <td style={{padding:"12px 15px",fontFamily:"monospace"}}>{l.ld}</td>
                     <td style={{padding:"12px 15px",fontWeight:800,color:"#fff",fontSize:16}}>{l.hrs}</td>
                     <td style={{padding:"12px 15px",color:"#f87171",fontSize:13}}>{l.discrepancy}</td>
+                    <td style={{padding:"12px 15px",textAlign:"center",whiteSpace:"nowrap"}}>
+                      <button onClick={()=>setEditFlight({log:l, idx:i})} style={{padding:"4px 8px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:4,marginRight:5,cursor:"pointer",fontWeight:700,fontSize:12}}>✏️ แก้ไข</button>
+                      <button onClick={()=>handleDeleteLog(i)} style={{padding:"4px 8px",background:"#ef4444",color:"#fff",border:"none",borderRadius:4,cursor:"pointer",fontWeight:700,fontSize:12}}>🗑️ ลบ</button>
+                    </td>
+
                   </tr>
                 ))}
               </tbody>
