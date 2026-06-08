@@ -4859,8 +4859,16 @@ function PostFlightTab() {
                 if(!pd) return false;
                 if(pd.getFullYear() !== year || pd.getMonth() !== month) return false;
                 
-                return ((l.pilot && l.pilot.toUpperCase().includes(p.callsign.toUpperCase())) ||
-                        (l.copilot && l.copilot.toUpperCase().includes(p.callsign.toUpperCase())));
+                if (l.type !== acType) return false;
+                const checkMatch = (str) => {
+                  if(!str) return false;
+                  const s = str.toUpperCase();
+                  if (p.callsign && s.includes(p.callsign.toUpperCase())) return true;
+                  if (p.initial && s.includes(p.initial.toUpperCase())) return true;
+                  if (p.name && s.includes(p.name.toUpperCase())) return true;
+                  return false;
+                };
+                return checkMatch(l.pilot) || checkMatch(l.copilot);
               });
 
               const dailyHrs = {};
