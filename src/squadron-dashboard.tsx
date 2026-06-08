@@ -2266,12 +2266,12 @@ function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)
     try {
       setSyncing(true);
       const existing = await loadFromSheet("POST FLIGHT LOGS");
-      const newRow = [pfData.date, pfData.type, pfData.cs, pfData.mission, pfData.to, pfData.ld, pfData.hrs, pfData.ldg, pfData.fuel, pfData.crew, pfData.remark];
+      const newRow = [pfData.day, pfData.date, pfData.type, pfData.mission, pfData.ac, pfData.cs, pfData.pilot, pfData.copilot, pfData.to, pfData.ld, pfData.hrs, pfData.discrepancy];
       let allRows = [];
       if (existing && existing.length > 0) {
         allRows = [...existing, newRow];
       } else {
-        allRows = [["DATE","TYPE","C/S","MISSION","T/O","L/D","HRS","LDG","FUEL","CREW","REMARK"], newRow];
+        allRows = [["DAY","DATE","TYPE","MISSION","A/C","C/S","PILOT","CO-PILOT","T/O","L/D","HRS","DISCREPANCY"], newRow];
       }
       await saveToSheet("POST FLIGHT LOGS", allRows);
       showToast("บันทึก Post Flight สำเร็จ ✓");
@@ -4674,10 +4674,7 @@ function DashboardContent() {
 function PostFlightModal({ flight, onSave, onCancel }: { flight: any, onSave: (data:any)=>void, onCancel: ()=>void }) {
   const [to, setTo] = useState(flight.takeoff || "");
   const [ld, setLd] = useState(flight.land || "");
-  const [ldg, setLdg] = useState("");
-  const [fuel, setFuel] = useState(flight.fuel || "");
-  const [remark, setRemark] = useState("");
-  const [crew, setCrew] = useState(`${flight.pilot}${flight.coPilot ? ' / ' + flight.coPilot : ''}`);
+  const [discrepancy, setDiscrepancy] = useState("");
 
   // Calculate Hrs
   let hrs = "0.0";
@@ -4695,11 +4692,15 @@ function PostFlightModal({ flight, onSave, onCancel }: { flight: any, onSave: (d
 
   const handleSave = () => {
     onSave({
+      day: flight.day || "",
       date: flight.date,
       type: flight.acTypeF || flight.acType,
-      cs: flight.cs,
       mission: flight.mission,
-      to, ld, hrs, ldg, fuel, crew, remark
+      ac: flight.ac || "",
+      cs: flight.cs,
+      pilot: flight.pilot || "",
+      copilot: flight.coPilot || "",
+      to, ld, hrs, discrepancy
     });
   };
 
@@ -4723,29 +4724,13 @@ function PostFlightModal({ flight, onSave, onCancel }: { flight: any, onSave: (d
               <input type="time" value={ld} onChange={e=>setLd(e.target.value)} style={inp}/>
             </div>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div style={{background:"#1e3a5f",padding:10,borderRadius:8,display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center"}}>
-              <span style={{fontSize:12,color:"#93c5fd",fontWeight:700}}>ชั่วโมงบิน (Hrs)</span>
-              <span style={{fontSize:24,color:"#fff",fontWeight:800}}>{hrs}</span>
-            </div>
-            <div>
-              <div style={{fontSize:13,color:"var(--text-secondary)",marginBottom:5}}>จำนวนการลง (LDG)</div>
-              <input type="number" value={ldg} onChange={e=>setLdg(e.target.value)} style={inp} placeholder="เช่น 2"/>
-            </div>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div>
-              <div style={{fontSize:13,color:"var(--text-secondary)",marginBottom:5}}>เชื้อเพลิง (Fuel)</div>
-              <input value={fuel} onChange={e=>setFuel(e.target.value)} style={inp} placeholder="เช่น 2,500"/>
-            </div>
-            <div>
-              <div style={{fontSize:13,color:"var(--text-secondary)",marginBottom:5}}>นักบิน (Crew)</div>
-              <input value={crew} onChange={e=>setCrew(e.target.value)} style={inp}/>
-            </div>
+          <div style={{background:"#1e3a5f",padding:10,borderRadius:8,display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center"}}>
+            <span style={{fontSize:12,color:"#93c5fd",fontWeight:700}}>ชั่วโมงบิน (Hrs)</span>
+            <span style={{fontSize:24,color:"#fff",fontWeight:800}}>{hrs}</span>
           </div>
           <div>
-            <div style={{fontSize:13,color:"var(--text-secondary)",marginBottom:5}}>หมายเหตุ (Remark)</div>
-            <textarea value={remark} onChange={e=>setRemark(e.target.value)} style={{...inp,resize:"vertical",minHeight:60}} placeholder="ระบุภารกิจ หรือหมายเหตุ..."/>
+            <div style={{fontSize:13,color:"var(--text-secondary)",marginBottom:5}}>ข้อขัดข้อง (Discrepancy)</div>
+            <textarea value={discrepancy} onChange={e=>setDiscrepancy(e.target.value)} style={{...inp,resize:"vertical",minHeight:60}} placeholder="ระบุข้อขัดข้อง..."/>
           </div>
         </div>
         <div style={{padding:"15px 20px",borderTop:"1px solid var(--border-panel)",display:"flex",justifyContent:"flex-end",gap:10}}>
@@ -4771,9 +4756,9 @@ function PostFlightTab() {
     ]).then(([pfRows, pA, pB]) => {
       if(pfRows.length > 1) {
         setLogs(pfRows.slice(1).map(r=>({
-          date: r[0]||"", type: r[1]||"", cs: r[2]||"", mission: r[3]||"",
-          to: r[4]||"", ld: r[5]||"", hrs: r[6]||"", ldg: r[7]||"",
-          fuel: r[8]||"", crew: r[9]||"", remark: r[10]||""
+          day: r[0]||"", date: r[1]||"", type: r[2]||"", mission: r[3]||"",
+          ac: r[4]||"", cs: r[5]||"", pilot: r[6]||"", copilot: r[7]||"",
+          to: r[8]||"", ld: r[9]||"", hrs: r[10]||"", discrepancy: r[11]||""
         })));
       }
       
@@ -4804,35 +4789,36 @@ function PostFlightTab() {
       </div>
 
       <div style={{display:"flex",gap:10,background:"var(--bg-panel)",padding:5,borderRadius:10,width:"fit-content"}}>
-        <button onClick={()=>setView("log")} style={{padding:"8px 20px",borderRadius:8,background:view==="log"?"#3b82f6":"transparent",color:view==="log"?"#fff":"var(--text-secondary)",border:"none",cursor:"pointer",fontWeight:700}}>บันทึกรายเที่ยว (Log)</button>
+        <button onClick={()=>setView("log")} style={{padding:"8px 20px",borderRadius:8,background:view==="log"?"#3b82f6":"transparent",color:view==="log"?"#fff":"var(--text-secondary)",border:"none",cursor:"pointer",fontWeight:700}}>บันทึกรายวัน (Log)</button>
         <button onClick={()=>setView("hours")} style={{padding:"8px 20px",borderRadius:8,background:view==="hours"?"#8b5cf6":"transparent",color:view==="hours"?"#fff":"var(--text-secondary)",border:"none",cursor:"pointer",fontWeight:700}}>สรุปชั่วโมงบินนักบิน</button>
       </div>
 
       {view === "log" && (
         <div className="glass-panel">
-          <div style={{padding:"15px 20px",borderBottom:"1px solid var(--border-panel)",fontWeight:800,fontSize:16}}>📝 บันทึกชั่วโมงบินรายเที่ยว (POST Flight Log)</div>
+          <div style={{padding:"15px 20px",borderBottom:"1px solid var(--border-panel)",fontWeight:800,fontSize:16}}>📝 บันทึกชั่วโมงบินรายวัน (POST Flight Log)</div>
           <div style={{overflowX:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse"}}>
               <thead>
                 <tr style={{background:"var(--bg-accent)"}}>
-                  {["DATE","TYPE","C/S","MISSION","T/O","L/D","ชม.บิน","LDG","FUEL","CREW","REMARK"].map(h=><th key={h} style={{padding:"12px 15px",color:"var(--text-secondary)",fontSize:12,textAlign:"left"}}>{h}</th>)}
+                  {["DAY","DATE","TYPE","MISSION","A/C","C/S","PILOT","CO-PILOT","T/O","L/D","ชม.บิน","ข้อขัดข้อง"].map(h=><th key={h} style={{padding:"12px 15px",color:"var(--text-secondary)",fontSize:12,textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {logs.length===0&&<tr><td colSpan={11} style={{textAlign:"center",padding:30,color:"var(--text-secondary)"}}>ยังไม่มีข้อมูล Post Flight</td></tr>}
                 {logs.map((l,i)=>(
                   <tr key={i} style={{borderBottom:"1px solid var(--border-panel)"}}>
-                    <td style={{padding:"12px 15px",fontWeight:700,color:"#fff"}}>{l.date}</td>
+                    <td style={{padding:"12px 15px",color:"#fbbf24",fontWeight:700}}>{l.day}</td>
+                    <td style={{padding:"12px 15px",fontWeight:700,color:"#fff",whiteSpace:"nowrap"}}>{l.date}</td>
                     <td style={{padding:"12px 15px"}}><span style={{background:l.type==="S-92A"?"#312e81":"#064e3b",color:l.type==="S-92A"?"#a5b4fc":"#6ee7b7",padding:"2px 8px",borderRadius:4,fontSize:12,fontWeight:700}}>{l.type}</span></td>
-                    <td style={{padding:"12px 15px",fontWeight:800,color:"#f8fafc"}}>{l.cs}</td>
                     <td style={{padding:"12px 15px",color:"var(--text-secondary)"}}>{l.mission}</td>
+                    <td style={{padding:"12px 15px",fontWeight:800,color:"#cbd5e1"}}>{l.ac}</td>
+                    <td style={{padding:"12px 15px",fontWeight:800,color:"#f8fafc"}}>{l.cs}</td>
+                    <td style={{padding:"12px 15px",fontWeight:700,color:"#60a5fa"}}>{l.pilot}</td>
+                    <td style={{padding:"12px 15px",fontWeight:700,color:"#94a3b8"}}>{l.copilot}</td>
                     <td style={{padding:"12px 15px",fontFamily:"monospace"}}>{l.to}</td>
                     <td style={{padding:"12px 15px",fontFamily:"monospace"}}>{l.ld}</td>
                     <td style={{padding:"12px 15px",fontWeight:800,color:"#fff",fontSize:16}}>{l.hrs}</td>
-                    <td style={{padding:"12px 15px"}}>{l.ldg}</td>
-                    <td style={{padding:"12px 15px",fontFamily:"monospace"}}>{l.fuel}</td>
-                    <td style={{padding:"12px 15px",fontWeight:700}}>{l.crew}</td>
-                    <td style={{padding:"12px 15px",color:"var(--text-secondary)",fontSize:13}}>{l.remark}</td>
+                    <td style={{padding:"12px 15px",color:"#f87171",fontSize:13}}>{l.discrepancy}</td>
                   </tr>
                 ))}
               </tbody>
@@ -4860,7 +4846,8 @@ function PostFlightTab() {
                   // คำนวณชั่วโมงบินของนักบินคนนี้ จาก Logs
                   // crew string "SHARK / VIPER"
                   const pilotHrs = logs.reduce((sum, l) => {
-                    if(l.crew.toUpperCase().includes(p.callsign.toUpperCase())) {
+                    if((l.pilot && l.pilot.toUpperCase().includes(p.callsign.toUpperCase())) ||
+                       (l.copilot && l.copilot.toUpperCase().includes(p.callsign.toUpperCase()))) {
                       return sum + (parseFloat(l.hrs)||0);
                     }
                     return sum;
