@@ -5212,8 +5212,8 @@ function PostFlightTab() {
   useEffect(() => {
     Promise.all([
       loadFromSheet("POST FLIGHT LOGS"),
-      loadFromSheet("PILOTS S-92A FOR POSTFLIGHT"),
-      loadFromSheet("PILOTS S-70i FOR POSTFLIGHT")
+      loadFromSheet("PILOTS S-92A FOR DATA"),
+      loadFromSheet("PILOTS S-70i FOR DATA")
     ]).then(([pfRows, pA, pB]) => {
       if(pfRows.length > 1) {
         const fmtTime = (t) => {
@@ -5234,11 +5234,11 @@ function PostFlightTab() {
         if (rows.length <= 1) return [];
         return rows.slice(1).map(r => ({
           acType: type,
-          rank: r[1] || "",
-          name: r[2] || "",
+          rank: r[0] || "",
+          name: r[1] || "",
           callsign: r[3] || "",
           initial: r[3] || "",
-          baseHrs: r[4] || "0",
+          baseHrs: r[8] || "0",
         })).filter(p => p.name.trim() !== "");
       };
       setPilots([...parsePilotForPostFlight(pA, "S-92A"), ...parsePilotForPostFlight(pB, "S-70i")]);
