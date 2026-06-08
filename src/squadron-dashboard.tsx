@@ -2129,6 +2129,7 @@ function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)
   const [toast,    setToast]    = useState(null);
   const [syncing,  setSyncing]  = useState(false);
   const [expandedRow, setExpandedRow] = useState<number|null>(null);
+  const [pfFlight, setPfFlight] = useState(null);
 
   const [loadError,   setLoadError]   = useState<string|null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -2261,6 +2262,28 @@ function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)
     setFocusDay(null);
   };
 
+  const handleSavePostFlight = async (pfData) => {
+    try {
+      setSyncing(true);
+      const existing = await loadFromSheet("POST FLIGHT LOGS");
+      const newRow = [pfData.date, pfData.type, pfData.cs, pfData.mission, pfData.to, pfData.ld, pfData.hrs, pfData.ldg, pfData.fuel, pfData.crew, pfData.remark];
+      let allRows = [];
+      if (existing && existing.length > 0) {
+        allRows = [...existing, newRow];
+      } else {
+        allRows = [["DATE","TYPE","C/S","MISSION","T/O","L/D","HRS","LDG","FUEL","CREW","REMARK"], newRow];
+      }
+      await saveToSheet("POST FLIGHT LOGS", allRows);
+      showToast("บันทึก Post Flight สำเร็จ ✓");
+      setPfFlight(null);
+    } catch(err) {
+      console.error(err);
+      showToast("บันทึก Post Flight ล้มเหลว", "#ef4444");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handleDelete = (idx) => {
     const next = flights.filter((_,i)=>i!==idx);
     setFlights(next);
@@ -2369,6 +2392,10 @@ function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)
                 </>}
                 <span style={{fontSize:14,fontWeight:700,color:"var(--text-secondary)",margin:"0 4px"}}>|</span>
                 <span style={{fontSize:14,fontWeight:800,color:"var(--text-primary)",marginRight:5}}>จัดการ</span>
+                <button onClick={e=>{e.stopPropagation();setPfFlight(f);}}
+                  style={{padding:"6px 15px",fontSize:14,borderRadius:8,border:"none",background:"#4f46e5",color:"#fff",cursor:"pointer",fontWeight:700}}>
+                  📝 Post Flight
+                </button>
                 <button onClick={e=>{e.stopPropagation();setMode(mode===realIdx?null:realIdx);setExpandedRow(null);}}
                   style={{padding:"6px 15px",fontSize:14,borderRadius:8,border:"1px solid #3b82f6",background:isEditing?"#3b82f6":"#eff6ff",color:isEditing?"#fff":"#2563eb",cursor:"pointer",fontWeight:700}}>
                   {isEditing?"✕ ยกเลิก":"✏️ แก้ไข"}
@@ -2511,6 +2538,8 @@ function FlightTab({onOpenSafety}:{onOpenSafety?:(type:"risk"|"hazard",data:any)
           />
         </div>
       )}
+
+      {pfFlight && (<PostFlightModal flight={pfFlight} onSave={handleSavePostFlight} onCancel={()=>setPfFlight(null)} />)}
 
       {/* Main Content View */}
       <div style={{padding:"15px 24px 20px"}}>
@@ -4308,6 +4337,7 @@ export default function App() {
     {id:"dashboard", l:"🏠 Dashboard"},
     {id:"notam",     l:"📡 NOTAM"},
     {id:"flight",    l:"✈️ FLIGHT SCHEDULE"},
+    {id:"postflight",l:"📑 POST FLIGHT"},
     {id:"duty",      l:"📋 PILOT ON DUTY"},
     {id:"aircraft",  l:"🛩️ AIRCRAFT STATUS"},
     {id:"pilot",     l:"👨‍✈️ รายชื่อนักบิน"},
@@ -4320,6 +4350,7 @@ export default function App() {
   const MOBILE_TABS = [
     {id:"dashboard", l:"🏠 Dashboard", icon:"🏠"},
     {id:"flight",    l:"✈️ ตารางบิน", icon:"✈️"},
+    {id:"postflight",l:"📑 Post Flight", icon:"📑"},
     {id:"duty",      l:"📋 เวรบิน", icon:"📋"},
     {id:"aircraft",  l:"🛩️ เครื่องบิน", icon:"🛩️"},
     {id:"more",      l:"☰ เมนูอื่น", icon:"☰"}
@@ -4476,6 +4507,7 @@ export default function App() {
         {tab==="dashboard"&&<DashboardContent/>}
         {tab==="notam"    &&<NotamTab/>}
         {tab==="flight"   &&<FlightTab onOpenSafety={openSafety}/>}
+        {tab==="postflight"&&<PostFlightTab/>}
         {tab==="duty"     &&<DutyTab/>}
         {tab==="aircraft" &&<AcTab/>}
         {tab==="pilot"    &&<PilotTab/>}
@@ -4633,6 +4665,225 @@ function DashboardContent() {
         </Sec>
 
       </div>
+    </div>
+  );
+}
+
+// ── Post Flight Tab & Components ──────────────────────────────────────────────────
+
+function PostFlightModal({ flight, onSave, onCancel }: { flight: any, onSave: (data:any)=>void, onCancel: ()=>void }) {
+  const [to, setTo] = useState(flight.takeoff || "");
+  const [ld, setLd] = useState(flight.land || "");
+  const [ldg, setLdg] = useState("");
+  const [fuel, setFuel] = useState(flight.fuel || "");
+  const [remark, setRemark] = useState("");
+  const [crew, setCrew] = useState(`${flight.pilot}${flight.coPilot ? ' / ' + flight.coPilot : ''}`);
+
+  // Calculate Hrs
+  let hrs = "0.0";
+  try {
+    if (to && ld) {
+      const [th, tm] = to.split(":").map(Number);
+      const [lh, lm] = ld.split(":").map(Number);
+      let t_mins = th * 60 + tm;
+      let l_mins = lh * 60 + lm;
+      if (l_mins < t_mins) l_mins += 24 * 60; // next day
+      const diffMins = l_mins - t_mins;
+      hrs = (diffMins / 60).toFixed(1);
+    }
+  } catch(e){}
+
+  const handleSave = () => {
+    onSave({
+      date: flight.date,
+      type: flight.acTypeF || flight.acType,
+      cs: flight.cs,
+      mission: flight.mission,
+      to, ld, hrs, ldg, fuel, crew, remark
+    });
+  };
+
+  const inp = {background:"#0f172a",border:"1px solid #334155",color:"#e2e8f0",borderRadius:6,padding:"8px 12px",fontSize:15,width:"100%",boxSizing:"border-box" as any};
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:1100,display:"flex",alignItems:"center",justifyContent:"center",padding:20,backdropFilter:"blur(5px)"}}>
+      <div style={{background:"var(--bg-panel)",border:"1px solid var(--border-panel)",borderRadius:16,width:"100%",maxWidth:500,boxShadow:"0 10px 40px rgba(0,0,0,0.3)",overflow:"hidden"}}>
+        <div style={{padding:"15px 20px",background:"var(--bg-accent)",borderBottom:"1px solid var(--border-panel)",display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:20}}>📝</span>
+          <span style={{fontWeight:800,fontSize:16,color:"#fff"}}>บันทึก Post Flight: {flight.cs}</span>
+        </div>
+        <div style={{padding:20,display:"grid",gap:15}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div>
+              <div style={{fontSize:13,color:"var(--text-secondary)",marginBottom:5}}>Take-off (T/O)</div>
+              <input type="time" value={to} onChange={e=>setTo(e.target.value)} style={inp}/>
+            </div>
+            <div>
+              <div style={{fontSize:13,color:"var(--text-secondary)",marginBottom:5}}>Landing (L/D)</div>
+              <input type="time" value={ld} onChange={e=>setLd(e.target.value)} style={inp}/>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div style={{background:"#1e3a5f",padding:10,borderRadius:8,display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center"}}>
+              <span style={{fontSize:12,color:"#93c5fd",fontWeight:700}}>ชั่วโมงบิน (Hrs)</span>
+              <span style={{fontSize:24,color:"#fff",fontWeight:800}}>{hrs}</span>
+            </div>
+            <div>
+              <div style={{fontSize:13,color:"var(--text-secondary)",marginBottom:5}}>จำนวนการลง (LDG)</div>
+              <input type="number" value={ldg} onChange={e=>setLdg(e.target.value)} style={inp} placeholder="เช่น 2"/>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div>
+              <div style={{fontSize:13,color:"var(--text-secondary)",marginBottom:5}}>เชื้อเพลิง (Fuel)</div>
+              <input value={fuel} onChange={e=>setFuel(e.target.value)} style={inp} placeholder="เช่น 2,500"/>
+            </div>
+            <div>
+              <div style={{fontSize:13,color:"var(--text-secondary)",marginBottom:5}}>นักบิน (Crew)</div>
+              <input value={crew} onChange={e=>setCrew(e.target.value)} style={inp}/>
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:13,color:"var(--text-secondary)",marginBottom:5}}>หมายเหตุ (Remark)</div>
+            <textarea value={remark} onChange={e=>setRemark(e.target.value)} style={{...inp,resize:"vertical",minHeight:60}} placeholder="ระบุภารกิจ หรือหมายเหตุ..."/>
+          </div>
+        </div>
+        <div style={{padding:"15px 20px",borderTop:"1px solid var(--border-panel)",display:"flex",justifyContent:"flex-end",gap:10}}>
+          <button onClick={onCancel} style={{padding:"8px 20px",borderRadius:8,background:"transparent",color:"var(--text-secondary)",border:"1px solid var(--border-panel)",cursor:"pointer",fontWeight:700}}>ยกเลิก</button>
+          <button onClick={handleSave} style={{padding:"8px 25px",borderRadius:8,background:"#4f46e5",color:"#fff",border:"none",cursor:"pointer",fontWeight:800,boxShadow:"0 4px 12px rgba(79,70,229,0.3)"}}>💾 บันทึก Post Flight</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PostFlightTab() {
+  const [logs, setLogs] = useState([]);
+  const [pilots, setPilots] = useState([]);
+  const [ready, setReady] = useState(false);
+  const [view, setView] = useState("log"); // log or hours
+
+  useEffect(() => {
+    Promise.all([
+      loadFromSheet("POST FLIGHT LOGS"),
+      loadFromSheet("PILOTS S-92A"),
+      loadFromSheet("PILOTS S-70i")
+    ]).then(([pfRows, pA, pB]) => {
+      if(pfRows.length > 1) {
+        setLogs(pfRows.slice(1).map(r=>({
+          date: r[0]||"", type: r[1]||"", cs: r[2]||"", mission: r[3]||"",
+          to: r[4]||"", ld: r[5]||"", hrs: r[6]||"", ldg: r[7]||"",
+          fuel: r[8]||"", crew: r[9]||"", remark: r[10]||""
+        })));
+      }
+      
+      const parseP = (rows) => rows.length > 1 ? rows.slice(1).map(r=>({rank:r[0]||"",name:r[1]||"",nickname:r[2]||"",initial:r[3]||"",callsign:r[4]||"",tel:r[5]||"",acType:r[6]||"S-70i",classNum:r[7]||""})) : [];
+      setPilots([...parseP(pA), ...parseP(pB)]);
+      setReady(true);
+    }).catch(console.error);
+  }, []);
+
+  if(!ready) return <div style={{textAlign:"center",padding:50,color:"var(--text-secondary)"}}>กำลังโหลดข้อมูล...</div>;
+
+  const totalHrs = logs.reduce((sum, l) => sum + (parseFloat(l.hrs)||0), 0).toFixed(1);
+  const totalLdg = logs.reduce((sum, l) => sum + (parseInt(l.ldg)||0), 0);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      {/* Summary Cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:15}}>
+        <div className="glass-panel" style={{padding:20,borderLeft:"4px solid #8b5cf6"}}>
+          <div style={{color:"var(--text-secondary)",fontSize:13,fontWeight:700,marginBottom:5}}>⏱️ ชม.บินจริง (ทั้งหมด)</div>
+          <div style={{fontSize:36,fontWeight:800,color:"#fff"}}>{totalHrs}</div>
+          <div style={{fontSize:12,color:"#8b5cf6"}}>{logs.length} เที่ยวบินที่บันทึกแล้ว</div>
+        </div>
+        <div className="glass-panel" style={{padding:20,borderLeft:"4px solid #3b82f6"}}>
+          <div style={{color:"var(--text-secondary)",fontSize:13,fontWeight:700,marginBottom:5}}>🛬 จำนวนการลง (Landings)</div>
+          <div style={{fontSize:36,fontWeight:800,color:"#fff"}}>{totalLdg}</div>
+        </div>
+      </div>
+
+      <div style={{display:"flex",gap:10,background:"var(--bg-panel)",padding:5,borderRadius:10,width:"fit-content"}}>
+        <button onClick={()=>setView("log")} style={{padding:"8px 20px",borderRadius:8,background:view==="log"?"#3b82f6":"transparent",color:view==="log"?"#fff":"var(--text-secondary)",border:"none",cursor:"pointer",fontWeight:700}}>บันทึกรายเที่ยว (Log)</button>
+        <button onClick={()=>setView("hours")} style={{padding:"8px 20px",borderRadius:8,background:view==="hours"?"#8b5cf6":"transparent",color:view==="hours"?"#fff":"var(--text-secondary)",border:"none",cursor:"pointer",fontWeight:700}}>สรุปชั่วโมงบินนักบิน</button>
+      </div>
+
+      {view === "log" && (
+        <div className="glass-panel">
+          <div style={{padding:"15px 20px",borderBottom:"1px solid var(--border-panel)",fontWeight:800,fontSize:16}}>📝 บันทึกชั่วโมงบินรายเที่ยว (POST Flight Log)</div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead>
+                <tr style={{background:"var(--bg-accent)"}}>
+                  {["DATE","TYPE","C/S","MISSION","T/O","L/D","ชม.บิน","LDG","FUEL","CREW","REMARK"].map(h=><th key={h} style={{padding:"12px 15px",color:"var(--text-secondary)",fontSize:12,textAlign:"left"}}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {logs.length===0&&<tr><td colSpan={11} style={{textAlign:"center",padding:30,color:"var(--text-secondary)"}}>ยังไม่มีข้อมูล Post Flight</td></tr>}
+                {logs.map((l,i)=>(
+                  <tr key={i} style={{borderBottom:"1px solid var(--border-panel)"}}>
+                    <td style={{padding:"12px 15px",fontWeight:700,color:"#fff"}}>{l.date}</td>
+                    <td style={{padding:"12px 15px"}}><span style={{background:l.type==="S-92A"?"#312e81":"#064e3b",color:l.type==="S-92A"?"#a5b4fc":"#6ee7b7",padding:"2px 8px",borderRadius:4,fontSize:12,fontWeight:700}}>{l.type}</span></td>
+                    <td style={{padding:"12px 15px",fontWeight:800,color:"#f8fafc"}}>{l.cs}</td>
+                    <td style={{padding:"12px 15px",color:"var(--text-secondary)"}}>{l.mission}</td>
+                    <td style={{padding:"12px 15px",fontFamily:"monospace"}}>{l.to}</td>
+                    <td style={{padding:"12px 15px",fontFamily:"monospace"}}>{l.ld}</td>
+                    <td style={{padding:"12px 15px",fontWeight:800,color:"#fff",fontSize:16}}>{l.hrs}</td>
+                    <td style={{padding:"12px 15px"}}>{l.ldg}</td>
+                    <td style={{padding:"12px 15px",fontFamily:"monospace"}}>{l.fuel}</td>
+                    <td style={{padding:"12px 15px",fontWeight:700}}>{l.crew}</td>
+                    <td style={{padding:"12px 15px",color:"var(--text-secondary)",fontSize:13}}>{l.remark}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {view === "hours" && (
+        <div className="glass-panel">
+          <div style={{padding:"15px 20px",borderBottom:"1px solid var(--border-panel)",fontWeight:800,fontSize:16,color:"#e879f9"}}>📊 สรุปชั่วโมงบินนักบิน (แยกตามเครื่อง)</div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",minWidth:1000}}>
+              <thead>
+                <tr style={{background:"var(--bg-accent)"}}>
+                  <th style={{padding:"10px",textAlign:"center",color:"var(--text-secondary)",fontSize:12,borderRight:"1px solid var(--border-panel)"}}>ลำดับ</th>
+                  <th style={{padding:"10px",textAlign:"left",color:"var(--text-secondary)",fontSize:12,borderRight:"1px solid var(--border-panel)"}}>ยศ - ชื่อ - สกุล</th>
+                  <th style={{padding:"10px",textAlign:"center",color:"var(--text-secondary)",fontSize:12}}>Callsign</th>
+                  <th style={{padding:"10px",textAlign:"center",color:"var(--text-secondary)",fontSize:12}}>Type</th>
+                  <th style={{padding:"10px",textAlign:"center",color:"#fbbf24",fontSize:13}}>ยอดบินรวม (Hrs)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pilots.map((p,i)=>{
+                  // คำนวณชั่วโมงบินของนักบินคนนี้ จาก Logs
+                  // crew string "SHARK / VIPER"
+                  const pilotHrs = logs.reduce((sum, l) => {
+                    if(l.crew.toUpperCase().includes(p.callsign.toUpperCase())) {
+                      return sum + (parseFloat(l.hrs)||0);
+                    }
+                    return sum;
+                  }, 0);
+                  
+                  return (
+                    <tr key={i} style={{borderBottom:"1px solid var(--border-panel)"}}>
+                      <td style={{padding:"10px",textAlign:"center",color:"var(--text-secondary)",borderRight:"1px solid var(--border-panel)"}}>{i+1}</td>
+                      <td style={{padding:"10px",color:"#f8fafc",borderRight:"1px solid var(--border-panel)",fontWeight:600}}>{p.rank} {p.name}</td>
+                      <td style={{padding:"10px",textAlign:"center",color:"#38bdf8",fontFamily:"monospace",fontWeight:800}}>{p.callsign}</td>
+                      <td style={{padding:"10px",textAlign:"center"}}>
+                        <span style={{background:p.acType==="S-92A"?"#312e81":"#064e3b",color:p.acType==="S-92A"?"#a5b4fc":"#6ee7b7",padding:"2px 8px",borderRadius:4,fontSize:12,fontWeight:700}}>{p.acType}</span>
+                      </td>
+                      <td style={{padding:"10px",textAlign:"center",fontWeight:800,fontSize:16,color:pilotHrs>0?"#fbbf24":"var(--text-secondary)"}}>{pilotHrs > 0 ? pilotHrs.toFixed(1) : "-"}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{padding:15,color:"var(--text-secondary)",fontSize:12}}>* การคำนวณชั่วโมงบินรวมดึงจาก Post Flight Logs โดยจับคู่จากคำในช่อง Crew และ Callsign</div>
+        </div>
+      )}
     </div>
   );
 }
