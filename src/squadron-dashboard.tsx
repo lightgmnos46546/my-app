@@ -5295,12 +5295,12 @@ function PostFlightTab() {
               {weeks.map((w,i) => (
                 <th key={i} colSpan={w.days.length} style={{padding:"4px",color:"var(--text-secondary)",fontSize:11,borderRight:i<weeks.length-1?"1px solid #334155":"1px solid var(--border-panel)",borderBottom:"1px solid var(--border-panel)",textAlign:"center",background:i%2===0?"rgba(255,255,255,0.02)":"transparent"}}>{w.label}</th>
               ))}
-              <th rowSpan={2} style={{padding:"8px",color:"#fbbf24",fontSize:12,borderBottom:"1px solid var(--border-panel)"}}>ยอดบินรวม</th>
+              <th rowSpan={2} style={{padding:"8px",color:"#fbbf24",fontSize:12,borderBottom:"1px solid var(--border-panel)",borderLeft:"1px solid var(--border-panel)"}}>ยอดบินรวม</th>
             </tr>
             <tr style={{background:"var(--bg-panel)"}}>
               {weeks.map((w,wi) => (
                 w.days.map((d,di) => (
-                  <th key={d} style={{padding:"4px 2px",color:"#94a3b8",fontSize:10,borderRight:(di===w.days.length-1 && wi!==weeks.length-1)?"1px solid #334155":"none",borderBottom:"1px solid var(--border-panel)",textAlign:"center",minWidth:22,background:wi%2===0?"rgba(255,255,255,0.02)":"transparent"}}>{d}</th>
+                  <th key={d} style={{padding:"4px 2px",color:"#94a3b8",fontSize:10,borderRight:(di===w.days.length-1 && wi!==weeks.length-1)?"1px solid #334155":"1px solid rgba(255,255,255,0.05)",borderBottom:"1px solid var(--border-panel)",textAlign:"center",minWidth:22,background:wi%2===0?"rgba(255,255,255,0.02)":"transparent"}}>{d}</th>
                 ))
               ))}
             </tr>
@@ -5349,14 +5349,14 @@ function PostFlightTab() {
                     w.days.map((d,di) => {
                       const dh = dailyHrs[d];
                       return (
-                        <td key={d} style={{padding:"4px 2px",textAlign:"center",color:dh>0?"#38bdf8":"#475569",fontSize:12,fontWeight:dh>0?800:400,borderRight:(di===w.days.length-1 && wi!==weeks.length-1)?"1px solid #334155":"none",background:wi%2===0?"rgba(255,255,255,0.01)":"transparent"}}>
+                        <td key={d} style={{padding:"4px 2px",textAlign:"center",color:dh>0?"#38bdf8":"#475569",fontSize:12,fontWeight:dh>0?800:400,borderRight:(di===w.days.length-1 && wi!==weeks.length-1)?"1px solid #334155":"1px solid rgba(255,255,255,0.05)",background:wi%2===0?"rgba(255,255,255,0.01)":"transparent"}}>
                           {dh > 0 ? dh.toFixed(1) : "."}
                         </td>
                       );
                     })
                   ))}
 
-                  <td style={{padding:"8px",textAlign:"center",color:grandTotal>0?"#fbbf24":"var(--text-secondary)",fontWeight:800,fontSize:14}}>{grandTotal>0?grandTotal.toFixed(1):"-"}</td>
+                  <td style={{padding:"8px",textAlign:"center",color:grandTotal>0?"#fbbf24":"var(--text-secondary)",fontWeight:800,fontSize:14,borderLeft:"1px solid var(--border-panel)"}}>{grandTotal>0?grandTotal.toFixed(1):"-"}</td>
                 </tr>
               )
             })}
