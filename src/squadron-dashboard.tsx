@@ -5165,45 +5165,47 @@ function WeatherTab() {
         </button>
       </div>
 
-      <div style={{background:"#fff",borderRadius:"0 0 10px 10px",overflow:"hidden",border:"1px solid #e2e8f0"}}>
+      <div className="glass-panel" style={{borderRadius:"0 0 10px 10px",borderTop:"none"}}>
         {loading && <div style={{padding:40,textAlign:"center",color:"#94a3b8",fontSize:16}}>กำลังโหลดข้อมูลสภาพอากาศ...</div>}
         {error && <div style={{padding:40,textAlign:"center",color:"#ef4444",fontSize:16}}>{error}</div>}
         {!loading && !error && (
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:16}}>
-            <thead>
-              <tr style={{background:"#f8fafc"}}>
-                <th style={{padding:"12px 15px",borderBottom:"2px solid #e2e8f0",textAlign:"left",color:"#475569"}}>สนามบิน</th>
-                <th style={{padding:"12px 15px",borderBottom:"2px solid #e2e8f0",textAlign:"center",color:"#475569"}}>สภาวะ</th>
-                <th style={{padding:"12px 15px",borderBottom:"2px solid #e2e8f0",textAlign:"left",color:"#475569"}}>METAR (สภาพอากาศปัจจุบัน)</th>
-                <th style={{padding:"12px 15px",borderBottom:"2px solid #e2e8f0",textAlign:"left",color:"#475569"}}>TAF (พยากรณ์อากาศล่วงหน้า)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((item,i) => {
-                let colorBg = "#f1f5f9";
-                let colorText = "#64748b";
-                if (item.color === "VFR") { colorBg = "#dcfce7"; colorText = "#166534"; }
-                else if (item.color === "MVFR") { colorBg = "#dbeafe"; colorText = "#1e40af"; }
-                else if (item.color === "IFR") { colorBg = "#fee2e2"; colorText = "#991b1b"; }
-                else if (item.color === "LIFR") { colorBg = "#fce7f3"; colorText = "#be185d"; }
-                
-                return (
-                  <tr key={i} style={{borderBottom:"1px solid #e2e8f0"}}>
-                    <td style={{padding:"15px",verticalAlign:"top"}}>
-                      <div style={{fontWeight:800,color:"#1e293b",fontSize:16}}>{item.code}</div>
-                      <div style={{color:"#64748b",fontSize:13}}>{item.name}</div>
-                    </td>
-                    <td style={{padding:"15px",verticalAlign:"top",textAlign:"center"}}>
-                      {item.color ? <span style={{background:colorBg,color:colorText,padding:"4px 10px",borderRadius:6,fontWeight:800,fontSize:14}}>{item.color}</span> : "-"}
-                    </td>
-                    <td style={{padding:"15px",verticalAlign:"top",fontFamily:"monospace",color:"#0f172a",fontSize:15,whiteSpace:"pre-wrap",lineHeight:1.4}}>{item.metar||"NIL"}</td>
-                    <td style={{padding:"15px",verticalAlign:"top",fontFamily:"monospace",color:"#334155",fontSize:14,whiteSpace:"pre-wrap",lineHeight:1.4}}>{item.taf||"NIL"}</td>
-                  </tr>
-                );
-              })}
-              {shown.length===0 && <tr><td colSpan={4} style={{padding:40,textAlign:"center",color:"#94a3b8"}}>ไม่พบข้อมูล</td></tr>}
-            </tbody>
-          </table>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:16}}>
+              <thead>
+                <tr style={{background:"var(--bg-accent)"}}>
+                  <th style={{padding:"12px 15px",borderBottom:"1px solid var(--border-panel)",textAlign:"left",color:"var(--text-secondary)"}}>สนามบิน</th>
+                  <th style={{padding:"12px 15px",borderBottom:"1px solid var(--border-panel)",textAlign:"center",color:"var(--text-secondary)"}}>สภาวะ</th>
+                  <th style={{padding:"12px 15px",borderBottom:"1px solid var(--border-panel)",textAlign:"left",color:"var(--text-secondary)"}}>METAR (สภาพอากาศปัจจุบัน)</th>
+                  <th style={{padding:"12px 15px",borderBottom:"1px solid var(--border-panel)",textAlign:"left",color:"var(--text-secondary)"}}>TAF (พยากรณ์อากาศล่วงหน้า)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((item,i) => {
+                  let colorBg = "#334155";
+                  let colorText = "#94a3b8";
+                  if (item.color === "VFR") { colorBg = "rgba(34,197,94,0.2)"; colorText = "#4ade80"; }
+                  else if (item.color === "MVFR") { colorBg = "rgba(59,130,246,0.2)"; colorText = "#60a5fa"; }
+                  else if (item.color === "IFR") { colorBg = "rgba(239,68,68,0.2)"; colorText = "#f87171"; }
+                  else if (item.color === "LIFR") { colorBg = "rgba(236,72,153,0.2)"; colorText = "#f472b6"; }
+                  
+                  return (
+                    <tr key={i} style={{borderBottom:"1px solid var(--border-panel)",background:i%2===0?"transparent":"rgba(255,255,255,0.02)"}}>
+                      <td style={{padding:"15px",verticalAlign:"top"}}>
+                        <div style={{fontWeight:800,color:"#fff",fontSize:16}}>{item.code}</div>
+                        <div style={{color:"#94a3b8",fontSize:13}}>{item.name}</div>
+                      </td>
+                      <td style={{padding:"15px",verticalAlign:"top",textAlign:"center"}}>
+                        {item.color ? <span style={{background:colorBg,color:colorText,padding:"4px 10px",borderRadius:6,fontWeight:800,fontSize:14,border:`1px solid ${colorText}40`}}>{item.color}</span> : "-"}
+                      </td>
+                      <td style={{padding:"15px",verticalAlign:"top",fontFamily:"monospace",color:"#38bdf8",fontSize:15,whiteSpace:"pre-wrap",lineHeight:1.4}}>{item.metar||"NIL"}</td>
+                      <td style={{padding:"15px",verticalAlign:"top",fontFamily:"monospace",color:"#e2e8f0",fontSize:14,whiteSpace:"pre-wrap",lineHeight:1.4}}>{item.taf||"NIL"}</td>
+                    </tr>
+                  );
+                })}
+                {shown.length===0 && <tr><td colSpan={4} style={{padding:40,textAlign:"center",color:"#94a3b8"}}>ไม่พบข้อมูล</td></tr>}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
