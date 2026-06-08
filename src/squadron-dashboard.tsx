@@ -1554,8 +1554,8 @@ function PilotTab() {
   // โหลดจาก Sheet แยกตาม acType
   useEffect(() => {
     Promise.all([
-      loadFromSheet("PILOTS S-92A"),
-      loadFromSheet("PILOTS S-70i"),
+      loadFromSheet("PILOTS S-92A FOR DATA"),
+      loadFromSheet("PILOTS S-70i FOR DATA"),
     ]).then(([rowsA, rowsB]) => {
       const parse = (rows) => rows.length > 1
         ? rows.slice(1).map(r=>({rank:r[0]||"",name:r[1]||"",nickname:r[2]||"",initial:r[3]||"",callsign:r[4]||"",tel:r[5]||"",acType:r[6]||"S-70i",classNum:r[7]||""}))
@@ -1575,8 +1575,8 @@ function PilotTab() {
     const rowsA = [header, ...pilotsA.map(p=>[p.rank,p.name,p.nickname||"",p.initial,p.callsign,p.tel,p.acType||"",p.classNum||""])];
     const rowsB = [header, ...pilotsB.map(p=>[p.rank,p.name,p.nickname||"",p.initial,p.callsign,p.tel,p.acType||"",p.classNum||""])];
     Promise.all([
-      saveToSheet("PILOTS S-92A", rowsA),
-      saveToSheet("PILOTS S-70i", rowsB),
+      saveToSheet("PILOTS S-92A FOR DATA", rowsA),
+      saveToSheet("PILOTS S-70i FOR DATA", rowsB),
     ]).finally(()=>setSyncing(false));
   };
 
@@ -2142,8 +2142,8 @@ function FlightForm({init, onSave, onCancel, onDateChange=null}) {
   // โหลดรายชื่อ pilot
   useEffect(() => {
     Promise.all([
-      loadFromSheet("PILOTS S-92A"),
-      loadFromSheet("PILOTS S-70i"),
+      loadFromSheet("PILOTS S-92A FOR DATA"),
+      loadFromSheet("PILOTS S-70i FOR DATA"),
     ]).then(([rowsA, rowsB]) => {
       const parse = (rows) => rows.length > 1
         ? rows.slice(1).map(r=>({rank:r[0]||"",name:r[1]||"",initial:r[2]||"",callsign:r[3]||"",tel:r[4]||"",acType:r[5]||"",classNum:r[6]||""}))
@@ -3881,7 +3881,7 @@ function SafetyTab({prefill=null, onClearPrefill=null}:{prefill?:any, onClearPre
       }
       setHazardLoaded(true);
     }).catch(()=>setHazardLoaded(true));
-    Promise.all([loadFromSheet("PILOTS S-92A"),loadFromSheet("PILOTS S-70i")]).then(([a,b])=>{
+    Promise.all([loadFromSheet("PILOTS S-92A FOR DATA"),loadFromSheet("PILOTS S-70i FOR DATA")]).then(([a,b])=>{
       const parse=(rows)=>rows.length>1?rows.slice(1).map(r=>({name:r[1]||"",callsign:r[3]||"",initial:r[2]||""})):[];
       setHazardPilots([...parse(a),...parse(b)]);
     });
