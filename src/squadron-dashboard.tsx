@@ -1693,9 +1693,9 @@ function PilotTab() {
                       <td style={{padding:"12px 15px",textAlign:"center",color:"#94a3b8",fontSize:14}}>{realIdx+1}</td>
                       <td style={{padding:"12px 15px",textAlign:"center",fontWeight:700,color:"#374151",fontSize:15}}>{p.rank}</td>
                       <td style={{padding:"12px 15px",fontWeight:600,color:"#1e293b"}}>{p.name}</td>
+                      <td style={{padding:"12px 15px",textAlign:"center",color:"#64748b",fontSize:14}}>{p.nickname||"—"}</td>
                       <td style={{padding:"12px 15px",textAlign:"center",color:"#0f766e",fontFamily:"monospace",fontWeight:700,fontSize:15}}>{p.initial||"—"}</td>
                       <td style={{padding:"12px 15px",textAlign:"center",fontWeight:800,color:"#1d4ed8",fontFamily:"monospace",fontSize:16}}>{p.callsign||"—"}</td>
-                      <td style={{padding:"12px 15px",textAlign:"center",fontWeight:800,color:"#7c3aed",fontFamily:"monospace",fontSize:16}}>{p.classNum||"—"}</td>
                       <td style={{padding:"12px 15px",textAlign:"center",fontSize:15,fontFamily:"monospace"}}>
                         {p.tel
                           ? <a href={`tel:${p.tel.replace(/[-\s]/g,"")}`} style={{color:"#2563eb",fontWeight:700,textDecoration:"none"}}
@@ -1705,6 +1705,7 @@ function PilotTab() {
                       <td style={{padding:"12px 15px",textAlign:"center"}}>
                         <span style={{background:p.acType==="S-92A"?"#d1fae5":"#e0f2fe",color:p.acType==="S-92A"?"#065f46":"#0369a1",fontWeight:700,fontSize:14,padding:"2px 10px",borderRadius:5}}>{p.acType||"—"}</span>
                       </td>
+                      <td style={{padding:"12px 15px",textAlign:"center",fontWeight:800,color:"#7c3aed",fontFamily:"monospace",fontSize:16}}>{p.classNum||"—"}</td>
                       <td style={{padding:"10px",textAlign:"center"}}>
                         <div style={{display:"flex",gap:5,justifyContent:"center"}}>
                           <button onClick={()=>openEdit(realIdx)} style={{padding:"5px 12px",fontSize:14,borderRadius:6,border:"1px solid #3b82f6",background:"transparent",color:"#3b82f6",cursor:"pointer"}}>✏️</button>
