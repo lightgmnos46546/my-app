@@ -5092,6 +5092,8 @@ function WeatherTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string|null>(null);
   const [search, setSearch] = useState("");
+  const [selectedStations, setSelectedStations] = useState<string[]>([]);
+  const toggleStation = (code) => setSelectedStations(p => p.includes(code) ? p.filter(c => c !== code) : [...p, code]);
 
   const fetchData = () => {
     setLoading(true);
@@ -5144,6 +5146,7 @@ function WeatherTab() {
   });
 
   const list:any[] = Object.values(map);
+  list.sort((a,b) => a.code.localeCompare(b.code));
 
   const formatWeather = (str: string) => {
     if (!str || str === "NIL") return "NIL";
@@ -5151,12 +5154,11 @@ function WeatherTab() {
   };
 
   const shown = list.filter(item => {
+    if (selectedStations.length > 0 && !selectedStations.includes(item.code)) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (item.code.toLowerCase().includes(q) || item.name.toLowerCase().includes(q));
   });
-
-  shown.sort((a,b) => a.code.localeCompare(b.code));
 
   return (
     <div>
@@ -5172,6 +5174,33 @@ function WeatherTab() {
       </div>
 
       <div className="glass-panel" style={{borderRadius:"0 0 10px 10px",borderTop:"none"}}>
+        {list.length > 0 && !loading && !error && (
+          <div style={{background:"rgba(0,0,0,0.2)", padding:"15px 25px", borderBottom:"1px solid var(--border-panel)"}}>
+            <div style={{fontSize:13,color:"var(--text-secondary)",marginBottom:10,fontWeight:700}}>🎯 เลือกสนามบินที่ต้องการดูข้อมูล (คลิกเพื่อเลือกเปิด/ปิดการแสดงผล):</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              {list.map((item:any) => {
+                const isSel = selectedStations.includes(item.code);
+                return (
+                  <button key={item.code} onClick={() => toggleStation(item.code)} 
+                    style={{
+                      background: isSel ? "#3b82f6" : "rgba(255,255,255,0.05)",
+                      color: isSel ? "#fff" : "var(--text-secondary)",
+                      border: isSel ? "1px solid #60a5fa" : "1px solid var(--border-panel)",
+                      borderRadius: 20, padding: "4px 12px", fontSize: 13, cursor:"pointer", fontWeight:600,
+                      transition: "all 0.2s"
+                    }}>
+                    {item.code}
+                  </button>
+                )
+              })}
+              {selectedStations.length > 0 && (
+                <button onClick={() => setSelectedStations([])} style={{background:"transparent",color:"#ef4444",border:"none",fontSize:13,cursor:"pointer",fontWeight:700,marginLeft:5}}>
+                  ✕ ล้างตัวกรอง
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {loading && <div style={{padding:40,textAlign:"center",color:"#94a3b8",fontSize:16}}>กำลังโหลดข้อมูลสภาพอากาศ...</div>}
         {error && <div style={{padding:40,textAlign:"center",color:"#ef4444",fontSize:16}}>{error}</div>}
         {!loading && !error && (
