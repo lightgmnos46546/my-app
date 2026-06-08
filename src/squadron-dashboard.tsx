@@ -5234,11 +5234,11 @@ function PostFlightTab() {
         if (rows.length <= 1) return [];
         return rows.slice(1).map(r => ({
           acType: type,
-          name: r[1] || "",
+          rank: r[1] || "",
+          name: r[2] || "",
           callsign: r[3] || "",
           initial: r[3] || "",
           baseHrs: r[4] || "0",
-          rank: ""
         })).filter(p => p.name.trim() !== "");
       };
       setPilots([...parsePilotForPostFlight(pA, "S-92A"), ...parsePilotForPostFlight(pB, "S-70i")]);
