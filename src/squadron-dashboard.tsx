@@ -1668,14 +1668,14 @@ function PilotTab() {
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:16}}>
               <thead>
                 <tr style={{background:"#1e3a5f"}}>
-                  {["","#","ยศ","ชื่อ-นามสกุล","ชื่อเล่น","ชื่อย่อ","Callsign","เบอร์โทร","Type A/C","รุ่น ชนอ.","จัดการ"].map(h=>(
+                  {["","#","ยศ","ชื่อ-นามสกุล","ชื่อเล่น","ชื่อย่อ","Callsign","เบอร์โทร","Type A/C","รุ่น ชนอ."].map(h=>(
                     <th key={h} style={{padding:"12px 15px",color:"#fff",fontWeight:800,fontSize:15,textAlign:"center",borderRight:"1px solid #1e40af"}}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered2.length===0 && (
-                  <tr><td colSpan={11} style={{padding:"40px",textAlign:"center",color:"#94a3b8",fontSize:16}}>
+                  <tr><td colSpan={10} style={{padding:"40px",textAlign:"center",color:"#94a3b8",fontSize:16}}>
                     {search ? "ไม่พบชื่อที่ค้นหา" : acFilter==="all" ? "ยังไม่มีรายชื่อ กด '+ เพิ่ม Pilot' เพื่อเริ่มต้น" : `ยังไม่มีรายชื่อนักบิน ${acFilter}`}
                   </td></tr>
                 )}
@@ -1691,7 +1691,11 @@ function PilotTab() {
                       onDragOver={e=>onDragOver(e,realIdx)}
                       onDrop={()=>onDrop(realIdx)}
                       onDragEnd={onDragEnd}
-                      style={{borderBottom:"1px solid #e2e8f0",background:isDragging?"#dbeafe":isOver?"#eff6ff":fi%2===0?"#fff":"#f9fafb",opacity:isDragging?0.5:1,borderTop:isOver?"2px solid #3b82f6":"",cursor:"grab"}}>
+                      onClick={() => {
+                        if (mode === realIdx) cancel();
+                        else openEdit(realIdx);
+                      }}
+                      style={{borderBottom:"1px solid #e2e8f0",background:isDragging?"#dbeafe":isOver?"#eff6ff":fi%2===0?"#fff":"#f9fafb",opacity:isDragging?0.5:1,borderTop:isOver?"2px solid #3b82f6":"",cursor:"pointer",transition:"background 0.2s"}}>
                       <td style={{padding:"7px 4px",textAlign:"center",color:"#cbd5e1",fontSize:20,userSelect:"none"}}>⠿</td>
                       <td style={{padding:"12px 15px",textAlign:"center",color:"#94a3b8",fontSize:14}}>{realIdx+1}</td>
                       <td style={{padding:"12px 15px",textAlign:"center",fontWeight:700,color:"#374151",fontSize:15}}>{p.rank}</td>
@@ -1702,29 +1706,23 @@ function PilotTab() {
                       <td style={{padding:"12px 15px",textAlign:"center",fontSize:15,fontFamily:"monospace"}}>
                         {p.tel
                           ? <a href={`tel:${p.tel.replace(/[-\s]/g,"")}`} style={{color:"#2563eb",fontWeight:700,textDecoration:"none"}}
-                              title={`โทร ${p.tel}`}>📞 {p.tel}</a>
+                              title={`โทร ${p.tel}`} onClick={(e)=>e.stopPropagation()}>📞 {p.tel}</a>
                           : <span style={{color:"#94a3b8"}}>—</span>}
                       </td>
                       <td style={{padding:"12px 15px",textAlign:"center"}}>
                         <span style={{background:p.acType==="S-92A"?"#d1fae5":"#e0f2fe",color:p.acType==="S-92A"?"#065f46":"#0369a1",fontWeight:700,fontSize:14,padding:"2px 10px",borderRadius:5}}>{p.acType||"—"}</span>
                       </td>
                       <td style={{padding:"12px 15px",textAlign:"center",fontWeight:800,color:"#7c3aed",fontFamily:"monospace",fontSize:16}}>{p.classNum||"—"}</td>
-                      <td style={{padding:"10px",textAlign:"center",position:"relative"}}>
-                        <button onClick={()=>setActionMenu(actionMenu===realIdx?null:realIdx)} style={{padding:"6px 12px",fontSize:14,borderRadius:6,border:"1px solid #cbd5e1",background:"#fff",color:"#475569",cursor:"pointer",fontWeight:600}}>จัดการ ▾</button>
-                        {actionMenu === realIdx && (
-                          <div style={{position:"absolute",right:30,top:45,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,boxShadow:"0 4px 15px rgba(0,0,0,0.1)",zIndex:50,display:"flex",flexDirection:"column",minWidth:130,overflow:"hidden"}}>
-                            <button onClick={()=>{ openEdit(realIdx); setActionMenu(null); }} style={{padding:"10px 15px",background:"transparent",border:"none",borderBottom:"1px solid #f1f5f9",textAlign:"left",cursor:"pointer",fontSize:14,color:"#3b82f6",fontWeight:600}}>✏️ แก้ไข</button>
-                            <button onClick={()=>{ setDelIdx(realIdx); setActionMenu(null); }} style={{padding:"10px 15px",background:"transparent",border:"none",textAlign:"left",cursor:"pointer",color:"#ef4444",fontSize:14,fontWeight:600}}>🗑 ลบ</button>
-                          </div>
-                        )}
-                      </td>
                     </tr>
                     {mode === realIdx && (
                       <tr>
-                        <td colSpan={11} style={{padding:0}}>
-                          <div style={{background:"#0f2040",padding:"20px",boxShadow:"inset 0 4px 8px rgba(0,0,0,0.3)"}}>
-                            <div style={{fontWeight:700,color:"#60a5fa",fontSize:16,marginBottom:15}}>
-                              ✏️ แก้ไขข้อมูล: {p.rank} {p.name} ({p.callsign})
+                        <td colSpan={10} style={{padding:0}}>
+                          <div style={{background:"#0f2040",padding:"20px",boxShadow:"inset 0 4px 8px rgba(0,0,0,0.3)",cursor:"default"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:15}}>
+                              <div style={{fontWeight:700,color:"#60a5fa",fontSize:16}}>
+                                ✏️ แก้ไขข้อมูล: {p.rank} {p.name} ({p.callsign})
+                              </div>
+                              <button onClick={(e)=>{e.stopPropagation(); setDelIdx(realIdx);}} style={{padding:"6px 15px",fontSize:14,borderRadius:8,border:"none",background:"rgba(239,68,68,0.2)",color:"#f87171",cursor:"pointer",fontWeight:700}}>🗑 ลบข้อมูลนักบินนี้</button>
                             </div>
                             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:10,marginBottom:15}}>
                               <div>
@@ -1765,8 +1763,8 @@ function PilotTab() {
                               </div>
                             </div>
                             <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
-                              <button onClick={cancel} style={{padding:"8px 20px",fontSize:15,borderRadius:8,border:"1px solid #334155",background:"transparent",color:"#94a3b8",cursor:"pointer"}}>ยกเลิก</button>
-                              <button onClick={save}   style={{padding:"8px 22px",fontSize:15,borderRadius:8,border:"none",background:"#2563eb",color:"#fff",cursor:"pointer",fontWeight:700}}>บันทึก ✓</button>
+                              <button onClick={(e)=>{e.stopPropagation(); cancel();}} style={{padding:"8px 20px",fontSize:15,borderRadius:8,border:"1px solid #334155",background:"transparent",color:"#94a3b8",cursor:"pointer"}}>ยกเลิก</button>
+                              <button onClick={(e)=>{e.stopPropagation(); save();}} style={{padding:"8px 22px",fontSize:15,borderRadius:8,border:"none",background:"#2563eb",color:"#fff",cursor:"pointer",fontWeight:700}}>บันทึก ✓</button>
                             </div>
                           </div>
                         </td>
