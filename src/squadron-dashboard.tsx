@@ -1456,7 +1456,7 @@ function PilotComboBox({ value, onChange, pilots, placeholder, dark=true }) {
 }
 
 // ── Pilot Tab ─────────────────────────────────────────────────────────────────
-const EMPTY_PILOT = { rank:"น.ท.", name:"", initial:"", callsign:"", tel:"", acType:"S-70i", classNum:"" };
+const EMPTY_PILOT = { rank:"น.ท.", name:"", nickname:"", initial:"", callsign:"", qual:"", tel:"", acType:"S-70i", classNum:"" };
 
 function PilotTab() {
   const [pilots,   setPilots]  = useState([]);
@@ -1480,7 +1480,7 @@ function PilotTab() {
       loadFromSheet("PILOTS S-70i"),
     ]).then(([rowsA, rowsB]) => {
       const parse = (rows) => rows.length > 1
-        ? rows.slice(1).map(r=>({rank:r[0]||"",name:r[1]||"",initial:r[2]||"",callsign:r[3]||"",tel:r[4]||"",acType:r[5]||"S-70i",classNum:r[6]||""}))
+        ? rows.slice(1).map(r=>({rank:r[0]||"",name:r[1]||"",nickname:r[2]||"",initial:r[3]||"",callsign:r[4]||"",qual:r[5]||"",tel:r[6]||"",acType:r[7]||"S-70i",classNum:r[8]||""}))
         : [];
       const combined = [...parse(rowsA), ...parse(rowsB)];
       if (combined.length > 0) setPilots(combined);
@@ -1491,11 +1491,11 @@ function PilotTab() {
   // บันทึกแยกตาม acType — เรียกใช้โดยตรงเมื่อมีการเปลี่ยนแปลง
   const savePilotsToSheet = (updatedPilots) => {
     setSyncing(true);
-    const header = ["rank","name","initial","callsign","tel","acType","classNum"];
+    const header = ["rank","name","nickname","initial","callsign","qual","tel","acType","classNum"];
     const pilotsA = updatedPilots.filter(p=>p.acType==="S-92A");
     const pilotsB = updatedPilots.filter(p=>p.acType!=="S-92A");
-    const rowsA = [header, ...pilotsA.map(p=>[p.rank,p.name,p.initial,p.callsign,p.tel,p.acType||"",p.classNum||""])];
-    const rowsB = [header, ...pilotsB.map(p=>[p.rank,p.name,p.initial,p.callsign,p.tel,p.acType||"",p.classNum||""])];
+    const rowsA = [header, ...pilotsA.map(p=>[p.rank,p.name,p.nickname||"",p.initial,p.callsign,p.qual||"",p.tel,p.acType||"",p.classNum||""])];
+    const rowsB = [header, ...pilotsB.map(p=>[p.rank,p.name,p.nickname||"",p.initial,p.callsign,p.qual||"",p.tel,p.acType||"",p.classNum||""])];
     Promise.all([
       saveToSheet("PILOTS S-92A", rowsA),
       saveToSheet("PILOTS S-70i", rowsB),
@@ -1553,8 +1553,10 @@ function PilotTab() {
     return (
       (p.rank||"").toLowerCase().includes(q) ||
       (p.name||"").toLowerCase().includes(q) ||
+      (p.nickname||"").toLowerCase().includes(q) ||
       (p.initial||"").toLowerCase().includes(q) ||
       (p.callsign||"").toLowerCase().includes(q) ||
+      (p.qual||"").toLowerCase().includes(q) ||
       (p.classNum||"").toLowerCase().includes(q) ||
       (p.acType||"").toLowerCase().includes(q)
     );
@@ -1599,12 +1601,20 @@ function PilotTab() {
               <input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={inp} placeholder="เช่น สมชาย ใจดี"/>
             </div>
             <div>
+              <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>ชื่อเล่น</div>
+              <input value={form.nickname||""} onChange={e=>setForm(p=>({...p,nickname:e.target.value}))} style={inp} placeholder="เช่น ชาย"/>
+            </div>
+            <div>
               <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>ชื่อย่อ (อังกฤษ)</div>
               <input value={form.initial} onChange={e=>setForm(p=>({...p,initial:e.target.value}))} style={inp} placeholder="เช่น S-CHAI"/>
             </div>
             <div>
               <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>Callsign</div>
               <input value={form.callsign} onChange={e=>setForm(p=>({...p,callsign:e.target.value}))} style={inp} placeholder="เช่น N-RA"/>
+            </div>
+            <div>
+              <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>คุณวุฒิ</div>
+              <input value={form.qual||""} onChange={e=>setForm(p=>({...p,qual:e.target.value}))} style={inp} placeholder="เช่น PIC, CP"/>
             </div>
             <div>
               <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>รุ่น ชนอ.</div>
@@ -1661,14 +1671,14 @@ function PilotTab() {
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:16}}>
               <thead>
                 <tr style={{background:"#1e3a5f"}}>
-                  {["","#","ยศ","ชื่อ-นามสกุล","ชื่อย่อ","Callsign","รุ่น ชนอ.","เบอร์โทร","Type A/C","จัดการ"].map(h=>(
+                  {["","#","ยศ","ชื่อ-นามสกุล","ชื่อเล่น","ชื่อย่อ","Callsign","คุณวุฒิ","เบอร์โทร","Type A/C","รุ่น ชนอ.","จัดการ"].map(h=>(
                     <th key={h} style={{padding:"12px 15px",color:"#fff",fontWeight:800,fontSize:15,textAlign:"center",borderRight:"1px solid #1e40af"}}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered2.length===0 && (
-                  <tr><td colSpan={10} style={{padding:"40px",textAlign:"center",color:"#94a3b8",fontSize:16}}>
+                  <tr><td colSpan={12} style={{padding:"40px",textAlign:"center",color:"#94a3b8",fontSize:16}}>
                     {search ? "ไม่พบชื่อที่ค้นหา" : acFilter==="all" ? "ยังไม่มีรายชื่อ กด '+ เพิ่ม Pilot' เพื่อเริ่มต้น" : `ยังไม่มีรายชื่อนักบิน ${acFilter}`}
                   </td></tr>
                 )}
