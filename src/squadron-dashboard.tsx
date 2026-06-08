@@ -270,6 +270,12 @@ const BC = {"ทอ.":"#3b82f6","ทบ.":"#22c55e","ทร.":"#f59e0b"};
 
 import { Clock, Card, Sec } from "./components/CommonUI";
 
+export const formatWeather = (str: string) => {
+  if (!str || str === "NIL") return "NIL";
+  return str.replace(/\s+/g, ' ').replace(/\s+(TEMPO|BECMG|FM|PROB|RMK|NOSIG)/g, '\n  $1').trim();
+};
+
+
 // ── NOTAM Tab ──────────────────────────────────────────────────────────────────
 // ── NOTAM parser (Base Ops RTAF format) ────────────────────────────────────────
 function parseNotamText(text) {
@@ -4592,6 +4598,11 @@ function DashboardContent() {
   const [safetyAnn, setSafetyAnn]= useState<any[]>([]);
   const [notams,    setNotams]   = useState<any[]>(Object.values(NOTAMS).flat());
 
+  const [weather, setWeather] = useState<any>(null);
+  const [calEvents, setCalEvents] = useState<any[]>([]);
+  const [postFlights, setPostFlights] = useState<any[]>([]);
+
+
   useEffect(()=>{
     const today=new Date();
     const todayStr=`${today.getDate()} ${MONTH_EN[today.getMonth()]}`;
@@ -4642,6 +4653,19 @@ function DashboardContent() {
     <div style={{width:"100%"}}>
       <div style={{display:"flex",flexDirection:"column",gap:20}}>
 
+        
+        {/* สภาพอากาศ (Weather) */}
+        <Sec title="สภาพอากาศล่าสุด (VTBD ดอนเมือง)" icon="🌤️">
+          {!weather ? <div style={{color:"var(--text-secondary)",fontSize:15,padding:"8px 0"}}>กำลังโหลดข้อมูลสภาพอากาศ...</div> : (
+            <div style={{padding:"8px 0"}}>
+              <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:8}}>
+                {weather.STATION_COLOR_NAME && <span style={{padding:"2px 8px",borderRadius:4,fontSize:12,fontWeight:800,background:weather.STATION_COLOR_NAME==="VFR"?"rgba(34,197,94,0.2)":weather.STATION_COLOR_NAME==="MVFR"?"rgba(59,130,246,0.2)":weather.STATION_COLOR_NAME==="IFR"?"rgba(239,68,68,0.2)":"rgba(236,72,153,0.2)",color:weather.STATION_COLOR_NAME==="VFR"?"#4ade80":weather.STATION_COLOR_NAME==="MVFR"?"#60a5fa":weather.STATION_COLOR_NAME==="IFR"?"#f87171":"#f472b6",border:`1px solid ${weather.STATION_COLOR_NAME==="VFR"?"#4ade8040":weather.STATION_COLOR_NAME==="MVFR"?"#60a5fa40":weather.STATION_COLOR_NAME==="IFR"?"#f8717140":"#f472b640"}`}}>{weather.STATION_COLOR_NAME}</span>}
+              </div>
+              <div style={{fontFamily:"'Sarabun', sans-serif",color:"#38bdf8",fontSize:15,whiteSpace:"pre-wrap",lineHeight:1.6,letterSpacing:0.2}}>{weather.METAR ? formatWeather(weather.METAR) : "NIL"}</div>
+            </div>
+          )}
+        </Sec>
+
         {/* 1. บันทึก/สั่งการล่าสุด */}
         <Sec title="บันทึก / สั่งการล่าสุด" icon="📋">
           {orders.length===0&&<div style={{color:"var(--text-secondary)",fontSize:15,padding:"8px 0"}}>ยังไม่มีบันทึก</div>}
@@ -4672,6 +4696,28 @@ function DashboardContent() {
         </Sec>
 
 
+        
+        {/* ปฏิทินปฏิบัติงาน */}
+        <Sec title="กำหนดการ / กิจกรรมเร็วๆ นี้" icon="📅">
+          {calEvents.length===0&&<div style={{color:"var(--text-secondary)",fontSize:15,padding:"8px 0"}}>ไม่มีกิจกรรมในสัปดาห์นี้</div>}
+          {calEvents.map((e,i)=>{
+            const dt = e.start?.dateTime ? new Date(e.start.dateTime) : (e.start?.date ? new Date(e.start.date) : null);
+            const timeStr = e.start?.dateTime ? dt?.toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit"}) : "ตลอดวัน";
+            return (
+              <div key={i} style={{padding:"10px 0",borderBottom:"1px solid var(--border-panel)",display:"flex",gap:15,alignItems:"center"}}>
+                <div style={{background:"var(--bg-accent)",padding:"5px 10px",borderRadius:8,textAlign:"center",minWidth:55,border:"1px solid var(--border-panel)"}}>
+                  <div style={{fontSize:11,color:"#60a5fa",fontWeight:800}}>{MONTH_EN[dt?.getMonth()||0]}</div>
+                  <div style={{fontSize:18,fontWeight:800,color:"#fff"}}>{dt?.getDate()}</div>
+                </div>
+                <div>
+                  <div style={{fontSize:15,fontWeight:700,color:"var(--text-primary)"}}>{e.summary}</div>
+                  <div style={{fontSize:13,color:"var(--text-secondary)",marginTop:2}}>🕒 {timeStr} {e.location?`· 📍 ${e.location}`:""}</div>
+                </div>
+              </div>
+            );
+          })}
+        </Sec>
+
         {/* 4. Hazard Report */}
         <Sec title="HAZARD REPORT ล่าสุด" icon="⚠️">
           {hazards.length===0&&<div style={{color:"var(--text-secondary)",fontSize:15,padding:"8px 0"}}>ยังไม่มีรายงาน</div>}
@@ -4694,6 +4740,21 @@ function DashboardContent() {
                 <div style={{fontSize:14,color:"var(--text-secondary)"}}>{f.pilot}{f.coPilot?` / ${f.coPilot}`:""}{f.route?` · ${f.route}`:""}</div>
               </div>
               <div style={{fontSize:14,color:"var(--text-secondary)",fontFamily:"monospace",flexShrink:0}}>{f.takeoff}{f.land?`–${f.land}`:""}</div>
+            </div>
+          ))}
+        </Sec>
+
+        
+        {/* Post Flight ล่าสุด */}
+        <Sec title="บันทึกเที่ยวบินล่าสุด (POST FLIGHT)" icon="📑">
+          {postFlights.length===0&&<div style={{color:"var(--text-secondary)",fontSize:15,padding:"8px 0"}}>ไม่มีข้อมูลการบิน</div>}
+          {postFlights.map((p,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:"1px solid var(--border-panel)"}}>
+              <span style={{fontSize:12,padding:"2px 8px",borderRadius:4,background:p[2]==="S-92A"?"#312e81":"#064e3b",color:p[2]==="S-92A"?"#a5b4fc":"#6ee7b7",fontWeight:700,flexShrink:0}}>{p[2]}</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:15,fontWeight:700,color:"var(--text-primary)"}}>{p[1]} · {p[6]}{p[7]?` / ${p[7]}`:""}</div>
+                <div style={{fontSize:13,color:"var(--text-secondary)",marginTop:2}}>เส้นทาง: {p[8]} – {p[9]} · ชม.บิน: <span style={{color:"#fbbf24",fontWeight:800}}>{p[10]}</span></div>
+              </div>
             </div>
           ))}
         </Sec>
@@ -5148,10 +5209,7 @@ function WeatherTab() {
   const list:any[] = Object.values(map);
   list.sort((a,b) => a.code.localeCompare(b.code));
 
-  const formatWeather = (str: string) => {
-    if (!str || str === "NIL") return "NIL";
-    return str.replace(/\s+/g, ' ').replace(/\s+(TEMPO|BECMG|FM|PROB|RMK|NOSIG)/g, '\n  $1').trim();
-  };
+
 
   const shown = list.filter(item => {
     if (selectedStations.length > 0 && !selectedStations.includes(item.code)) return false;
