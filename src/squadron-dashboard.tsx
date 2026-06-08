@@ -5230,8 +5230,18 @@ function PostFlightTab() {
         })));
       }
       
-      const parseP = (rows) => rows.length > 1 ? rows.slice(1).map(r=>({rank:r[0]||"",name:r[1]||"",nickname:r[2]||"",initial:r[3]||"",callsign:r[4]||"",tel:r[5]||"",acType:r[6]||"S-70i",classNum:r[7]||"",baseHrs:r[8]||"0"})) : [];
-      setPilots([...parseP(pA), ...parseP(pB)]);
+      const parsePilotForPostFlight = (rows, type) => {
+        if (rows.length <= 1) return [];
+        return rows.slice(1).map(r => ({
+          acType: type,
+          name: r[1] || "",
+          callsign: r[3] || "",
+          initial: r[3] || "",
+          baseHrs: r[4] || "0",
+          rank: ""
+        })).filter(p => p.name.trim() !== "");
+      };
+      setPilots([...parsePilotForPostFlight(pA, "S-92A"), ...parsePilotForPostFlight(pB, "S-70i")]);
       setReady(true);
     }).catch(console.error);
   }, []);
