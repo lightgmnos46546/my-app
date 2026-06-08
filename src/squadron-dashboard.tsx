@@ -4950,7 +4950,8 @@ function PostFlightTab() {
 
       <div style={{display:"flex",gap:10,background:"var(--bg-panel)",padding:5,borderRadius:10,width:"fit-content"}}>
         <button onClick={()=>setView("log")} style={{padding:"8px 20px",borderRadius:8,background:view==="log"?"#3b82f6":"transparent",color:view==="log"?"#fff":"var(--text-secondary)",border:"none",cursor:"pointer",fontWeight:700}}>บันทึกรายวัน (Log)</button>
-        <button onClick={()=>setView("hours")} style={{padding:"8px 20px",borderRadius:8,background:view==="hours"?"#8b5cf6":"transparent",color:view==="hours"?"#fff":"var(--text-secondary)",border:"none",cursor:"pointer",fontWeight:700}}>สรุปชั่วโมงบินนักบิน</button>
+        <button onClick={()=>setView("hours-70i")} style={{padding:"8px 20px",borderRadius:8,background:view==="hours-70i"?"#8b5cf6":"transparent",color:view==="hours-70i"?"#fff":"var(--text-secondary)",border:"none",cursor:"pointer",fontWeight:700}}>สรุปชั่วโมงบินรายเดือน(S-70i)</button>
+        <button onClick={()=>setView("hours-92a")} style={{padding:"8px 20px",borderRadius:8,background:view==="hours-92a"?"#8b5cf6":"transparent",color:view==="hours-92a"?"#fff":"var(--text-secondary)",border:"none",cursor:"pointer",fontWeight:700}}>สรุปชั่วโมงบินรายเดือน(S-92A)</button>
       </div>
 
       {view === "log" && (
@@ -4991,7 +4992,7 @@ function PostFlightTab() {
         </div>
       )}
 
-      {view === "hours" && (
+      {view.startsWith("hours") && (
         <div className="glass-panel">
           <div style={{padding:"15px 20px",borderBottom:"1px solid var(--border-panel)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
              <div style={{fontWeight:800,fontSize:16,color:"#e879f9"}}>📊 สรุปชั่วโมงบินนักบิน (แยกตามเครื่อง)</div>
@@ -5002,8 +5003,8 @@ function PostFlightTab() {
              </div>
           </div>
           <div style={{padding:20}}>
-            {renderGridTable("S-92A", pilots.filter(p=>p.acType==="S-92A"))}
-            {renderGridTable("S-70i", pilots.filter(p=>p.acType==="S-70i"))}
+            {view === "hours-92a" && renderGridTable("S-92A", pilots.filter(p=>p.acType==="S-92A"))}
+            {view === "hours-70i" && renderGridTable("S-70i", pilots.filter(p=>p.acType==="S-70i"))}
             
             <div style={{marginTop:10,color:"var(--text-secondary)",fontSize:12}}>
               * สรุปชั่วโมงบินรายวันอ้างอิงข้อมูลจาก Post Flight Log ของเดือนที่เลือก<br/>
