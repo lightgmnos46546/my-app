@@ -4470,7 +4470,7 @@ export default function App() {
     {id:"dashboard", l:"🏠 Dashboard"},
     {id:"notam",     l:"📡 NOTAM"},
     {id:"flight",    l:"✈️ FLIGHT SCHEDULE"},
-    
+    {id:"postflight",l:"📑 POST FLIGHT"},
     {id:"duty",      l:"📋 PILOT ON DUTY"},
     {id:"aircraft",  l:"🛩️ AIRCRAFT STATUS"},
     {id:"pilot",     l:"👨‍✈️ รายชื่อนักบิน"},
@@ -4484,7 +4484,7 @@ export default function App() {
   const MOBILE_TABS = [
     {id:"dashboard", l:"🏠 Dashboard", icon:"🏠"},
     {id:"flight",    l:"✈️ ตารางบิน", icon:"✈️"},
-    
+    {id:"postflight",l:"📑 Post Flight", icon:"📑"},
     {id:"duty",      l:"📋 เวรบิน", icon:"📋"},
     {id:"aircraft",  l:"🛩️ เครื่องบิน", icon:"🛩️"},
     {id:"more",      l:"☰ เมนูอื่น", icon:"☰"}
@@ -4641,7 +4641,7 @@ export default function App() {
         {tab==="dashboard"&&<DashboardContent/>}
         {tab==="notam"    &&<NotamTab/>}
         {tab==="flight"   &&<FlightTab onOpenSafety={openSafety}/>}
-        
+        {tab==="postflight"&&<PostFlightTab/>}
         {tab==="duty"     &&<DutyTab/>}
         {tab==="aircraft" &&<AcTab/>}
         {tab==="pilot"    &&<PilotTab/>}
