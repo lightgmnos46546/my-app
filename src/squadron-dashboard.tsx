@@ -4637,19 +4637,38 @@ export default function App() {
 }
 
 // ── Dashboard Content ──────────────────────────────────────────────────────────
-function DashboardContent() {
-  const [flights,   setFlights]  = useState<any[]>([]);
-  const [listA,     setListA]    = useState(AIRCRAFT_A);
-  const [listB,     setListB]    = useState(AIRCRAFT_B);
-  const [monthly,   setMonthly]  = useState<any[]>([]);
-  const [orders,    setOrders]   = useState<any[]>([]);
-  const [hazards,   setHazards]  = useState<any[]>([]);
-  const [safetyAnn, setSafetyAnn]= useState<any[]>([]);
-  const [notams,    setNotams]   = useState<any[]>(Object.values(NOTAMS).flat());
 
-  const [weather, setWeather] = useState<any>(null);
-  const [calEvents, setCalEvents] = useState<any[]>([]);
-  const [postFlights, setPostFlights] = useState<any[]>([]);
+function useCachedState<T>(key: string, initial: T): [T, (val: T) => void] {
+  const [state, setState] = useState<T>(() => {
+    try {
+      const cached = localStorage.getItem(key);
+      return cached ? JSON.parse(cached) : initial;
+    } catch {
+      return initial;
+    }
+  });
+  const setCachedState = (val: T) => {
+    setState(val);
+    try {
+      localStorage.setItem(key, JSON.stringify(val));
+    } catch (e) {}
+  };
+  return [state, setCachedState];
+}
+
+function DashboardContent() {
+  const [flights,   setFlights]  = useCachedState<any[]>("dash_flights", []);
+  const [listA,     setListA]    = useCachedState("dash_listA", AIRCRAFT_A);
+  const [listB,     setListB]    = useCachedState("dash_listB", AIRCRAFT_B);
+  const [monthly,   setMonthly]  = useCachedState<any[]>("dash_monthly", []);
+  const [orders,    setOrders]   = useCachedState<any[]>("dash_orders", []);
+  const [hazards,   setHazards]  = useCachedState<any[]>("dash_hazards", []);
+  const [safetyAnn, setSafetyAnn]= useCachedState<any[]>("dash_safetyAnn", []);
+  const [notams,    setNotams]   = useCachedState<any[]>("dash_notams", Object.values(NOTAMS).flat());
+
+  const [weather, setWeather] = useCachedState<any>("dash_weather", null);
+  const [calEvents, setCalEvents] = useCachedState<any[]>("dash_calEvents", []);
+  const [postFlights, setPostFlights] = useCachedState<any[]>("dash_postFlights", []);
 
 
   useEffect(()=>{
