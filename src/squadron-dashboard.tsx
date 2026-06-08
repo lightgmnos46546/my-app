@@ -5144,6 +5144,12 @@ function WeatherTab() {
   });
 
   const list:any[] = Object.values(map);
+
+  const formatWeather = (str: string) => {
+    if (!str || str === "NIL") return "NIL";
+    return str.replace(/\s+/g, ' ').replace(/\s+(TEMPO|BECMG|FM|PROB|RMK|NOSIG)/g, '\n  $1').trim();
+  };
+
   const shown = list.filter(item => {
     if (!search) return true;
     const q = search.toLowerCase();
