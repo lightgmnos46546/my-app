@@ -272,7 +272,7 @@ import { Clock, Card, Sec } from "./components/CommonUI";
 
 export const formatWeather = (str: string) => {
   if (!str || str === "NIL") return "NIL";
-  return str.replace(/\s+/g, ' ').replace(/\s+(TEMPO|BECMG|FM|PROB|RMK|NOSIG)/g, '\n  $1').trim();
+  return str.replace(/\s+/g, ' ').replace(/\s+(TEMPO|BECMG|FM|PROB)/g, '\n$1').trim();
 };
 
 
