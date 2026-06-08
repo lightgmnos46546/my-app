@@ -4755,10 +4755,17 @@ function PostFlightTab() {
       loadFromSheet("PILOTS S-70i")
     ]).then(([pfRows, pA, pB]) => {
       if(pfRows.length > 1) {
+        const fmtTime = (t) => {
+          if(!t) return "";
+          if(typeof t === 'string' && t.includes("T") && t.endsWith("Z")) {
+             return t.split("T")[1].substring(0,5);
+          }
+          return t;
+        };
         setLogs(pfRows.slice(1).map(r=>({
           day: r[0]||"", date: r[1]||"", type: r[2]||"", mission: r[3]||"",
           ac: r[4]||"", cs: r[5]||"", pilot: r[6]||"", copilot: r[7]||"",
-          to: r[8]||"", ld: r[9]||"", hrs: r[10]||"", discrepancy: r[11]||""
+          to: fmtTime(r[8]), ld: fmtTime(r[9]), hrs: r[10]||"", discrepancy: r[11]||""
         })));
       }
       
