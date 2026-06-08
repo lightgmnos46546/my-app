@@ -58,6 +58,27 @@ async function processQueue() {
   isFetchingQueue = false;
 }
 
+
+async function loadDashboardData() {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    const cacheBuster = new Date().getTime();
+    const res = await fetch(`${GAS_URL}?action=getDashboard&t=${cacheBuster}`, {
+      signal: controller.signal,
+      cache: "no-store"
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const text = await res.text();
+    const data = JSON.parse(text);
+    return data;
+  } catch (e) {
+    console.error("Dashboard consolidated fetch failed", e);
+    return null;
+  }
+}
+
 async function loadFromSheet(sheetName: string): Promise<any[][]> {
   return new Promise((resolve, reject) => {
     fetchQueue.push({ sheetName, resolve, reject });
@@ -4671,7 +4692,102 @@ function DashboardContent() {
   const [postFlights, setPostFlights] = useCachedState<any[]>("dash_postFlights", []);
 
 
-  useEffect(() => { /* Dashboard disabled */ }, []);
+  useEffect(() => {
+    const today = new Date();
+    const todayStr = `${today.getDate()} ${MONTH_EN[today.getMonth()]}`;
+    
+    // 1. Load everything from the new consolidated Google Apps Script endpoint!
+    loadDashboardData().then((dash) => {
+      if (!dash) return;
+      
+      // FLIGHT SCHEDULE
+      if (dash["FLIGHT SCHEDULE"] && dash["FLIGHT SCHEDULE"].length > 1) {
+        const [, ...data] = dash["FLIGHT SCHEDULE"];
+        setFlights(data.map((r:any) => ({
+          date: r[1] || "", acTypeF: r[2] || "", mission: r[3] || "", ac: r[4] || "",
+          cs: r[5] || "", pilot: r[6] || "", coPilot: r[7] || "", takeoff: r[8] || "",
+          land: r[9] || "", route: r[10] || ""
+        })).filter((f:any) => f.date === todayStr));
+      }
+      
+      // AIRCRAFT S-92A
+      if (dash["AIRCRAFT STATUS S-92A"] && dash["AIRCRAFT STATUS S-92A"].length > 1) {
+        setListA(dash["AIRCRAFT STATUS S-92A"].slice(1).map((r:any) => ({
+          id: r[0] || "", status: r[1] || "FMC", trouble: r[6] || "", remark: r[13] || ""
+        })));
+      }
+      
+      // AIRCRAFT S-70i
+      if (dash["AIRCRAFT STATUS S-70i"] && dash["AIRCRAFT STATUS S-70i"].length > 1) {
+        setListB(dash["AIRCRAFT STATUS S-70i"].slice(1).map((r:any) => ({
+          id: r[0] || "", status: r[1] || "FMC", trouble: r[6] || "", remark: r[13] || ""
+        })));
+      }
+      
+      // ORDERS
+      if (dash["ORDERS"] && dash["ORDERS"].length > 1) {
+        setOrders(dash["ORDERS"].slice(1,4).map((r:any) => ({
+          date: r[0] || "", items: (() => { try { return JSON.parse(r[1] || "[]"); } catch { return [r[1] || ""]; } })()
+        })));
+      }
+      
+      // HAZARD REPORT
+      if (dash["HAZARD REPORT"] && dash["HAZARD REPORT"].length > 1) {
+        setHazards(dash["HAZARD REPORT"].slice(1,4).map((r:any) => ({
+          date: r[0] || "", time: r[1] || "", reporter: r[2] || "", event: r[8] || ""
+        })));
+      }
+      
+      // SAFETY ANNOUNCEMENTS
+      if (dash["SAFETY ANNOUNCEMENTS"] && dash["SAFETY ANNOUNCEMENTS"].length > 1) {
+        setSafetyAnn(dash["SAFETY ANNOUNCEMENTS"].slice(1).map((r:any) => ({
+          title: r[0] || "", body: r[1] || "", date: r[2] || "", imageUrl: parseDriveUrl(r[3] || "")
+        })));
+      }
+      
+      // POST FLIGHT LOGS
+      if (dash["POST FLIGHT LOGS"] && dash["POST FLIGHT LOGS"].length > 1) {
+        setPostFlights(dash["POST FLIGHT LOGS"].slice(1).slice(-3).reverse());
+      }
+    });
+
+    // 2. Load Duty Schedule
+    loadDutySheetCSV().then(csv => {
+      if (csv.length > 1) {
+        const [, ...data] = csv;
+        setMonthly(data.filter(r => r.some(c => c.trim() !== "")).map(parseDutyRowNew));
+      }
+    }).catch(() => {});
+
+    // 3. Load NOTAMs
+    loadNotamFromCSV().then(rows => {
+      if (rows.length > 1) {
+        const parsedRows = parseNotamRows(rows);
+        const rawTexts = parsedRows.map(r => {
+          let val = r.Raw_Text || r.Description || "";
+          val = cleanRawText(val);
+          if (val && !val.trim().startsWith("(")) { val = "(" + val.trim() + ")"; }
+          return val;
+        }).filter(Boolean).join("\n\n");
+        const parsed = parseNotamText(rawTexts);
+        if (parsed.length > 0) setNotams(parsed);
+      }
+    }).catch(() => {});
+
+    // 4. Fetch Weather (VTBD)
+    fetch('https://weather.rtaf.mi.th/api/v1/metar/desktop/getMetarAllStationJSON', {method:'POST'}).then(r=>r.text()).then(t=>{
+      const d=JSON.parse(t.trim());
+      const w = (d.CURRENT_WEATHER||[]).find((s:any)=>s.STATION_CODE==="VTBD");
+      if(w) setWeather(w);
+    }).catch(()=>{});
+
+    // 5. Fetch Calendar (Next 3 events)
+    const calFrom = new Date();
+    const calTo = new Date(); calTo.setDate(calTo.getDate()+14);
+    fetch("https://www.googleapis.com/calendar/v3/calendars/"+encodeURIComponent("spidersqdn@gmail.com")+"/events?key="+GCAL_API_KEY+"&timeMin="+calFrom.toISOString()+"&timeMax="+calTo.toISOString()+"&singleEvents=true&orderBy=startTime&maxResults=3")
+      .then(r=>r.json()).then(d=>{ if(d.items) setCalEvents(d.items); }).catch(()=>{});
+
+  }, []);
 
   const allAc  = [...listA,...listB];
   const fmc    = allAc.filter(a=>a.status==="FMC").length;
