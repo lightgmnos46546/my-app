@@ -5290,8 +5290,8 @@ function WeatherTab() {
                       <td style={{padding:"15px",verticalAlign:"top",textAlign:"center"}}>
                         {item.color ? <span style={{background:colorBg,color:colorText,padding:"4px 10px",borderRadius:6,fontWeight:800,fontSize:14,border:`1px solid ${colorText}40`}}>{item.color}</span> : "-"}
                       </td>
-                      <td style={{padding:"15px",verticalAlign:"top",fontFamily:"monospace",color:"#38bdf8",fontSize:15,whiteSpace:"pre-wrap",lineHeight:1.4}}>{item.metar||"NIL"}</td>
-                      <td style={{padding:"15px",verticalAlign:"top",fontFamily:"monospace",color:"#e2e8f0",fontSize:14,whiteSpace:"pre-wrap",lineHeight:1.4}}>{item.taf||"NIL"}</td>
+                      <td style={{padding:"15px",verticalAlign:"top",fontFamily:"'Sarabun', sans-serif",color:"#38bdf8",fontSize:16,whiteSpace:"pre-wrap",lineHeight:1.6,letterSpacing:0.2}}>{formatWeather(item.metar)}</td>
+                      <td style={{padding:"15px",verticalAlign:"top",fontFamily:"'Sarabun', sans-serif",color:"#e2e8f0",fontSize:15,whiteSpace:"pre-wrap",lineHeight:1.6,letterSpacing:0.2}}>{formatWeather(item.taf)}</td>
                     </tr>
                   );
                 })}
