@@ -21,8 +21,10 @@ async function loadFromSheet(sheetName: string): Promise<any[][]> {
     const controller = new AbortController();
     const limit = sheetName === "Flight Schedule 201" ? 90000 : 15000;
     const timeout = setTimeout(() => controller.abort(), limit);
-    const res = await fetch(`${GAS_URL}?sheet=${encodeURIComponent(sheetName)}`, {
-      signal: controller.signal
+    const cacheBuster = new Date().getTime();
+    const res = await fetch(`${GAS_URL}?sheet=${encodeURIComponent(sheetName)}&t=${cacheBuster}`, {
+      signal: controller.signal,
+      cache: "no-store"
     });
     clearTimeout(timeout);
     const data = await res.json();
@@ -83,7 +85,11 @@ async function loadNotamFromCSV(): Promise<any[][]> {
     const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&sheet=NOTAM`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
-    const res = await fetch(url, { signal: controller.signal });
+    const cacheBuster = new Date().getTime();
+    const res = await fetch(`${url}&t=${cacheBuster}`, { 
+      signal: controller.signal,
+      cache: "no-store"
+    });
     clearTimeout(timeout);
     if (!res.ok) throw new Error("HTTP " + res.status);
     const csvText = await res.text();
