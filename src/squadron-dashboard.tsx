@@ -5012,8 +5012,8 @@ function PostFlightModal({ flight, onSave, onCancel }: { flight: any, onSave: (d
 }
 
 function PostFlightTab() {
-  const [logs, setLogs] = useState([]);
-  const [pilots, setPilots] = useState([]);
+  const [logs, setLogs] = useCachedState<any[]>("tab_logs_new", []);
+  const [pilots, setPilots] = useCachedState<any[]>("tab_pilots_pf", []);
   const [ready, setReady] = useState(false);
   const [editFlight, setEditFlight] = useState(null);
   const [syncing, setSyncing] = useState(false);
