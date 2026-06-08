@@ -1,3 +1,4 @@
+import React from 'react';
 import { useState, useEffect, useRef, Fragment } from "react";
 
 // ── Google Sheets Sync ────────────────────────────────────────────────────────
@@ -1470,6 +1471,7 @@ function PilotTab() {
   const [dragIdx,  setDragIdx] = useState(null);
   const [dragOver, setDragOver]= useState(null);
   const [manualOrder, setManualOrder] = useState(false);
+  const [actionMenu, setActionMenu] = useState(null);
 
   const inp = {background:"#0f172a",border:"1px solid #334155",color:"#e2e8f0",borderRadius:6,padding:"6px 10px",fontSize:15,width:"100%",boxSizing:"border-box" as any};
 
@@ -1583,7 +1585,7 @@ function PilotTab() {
       </div>
 
       {/* Form */}
-      {mode !== null && (
+      {mode === "add" && (
         <div style={{background:"#0f2040",border:"1px solid #2563eb",borderRadius:10,padding:16,marginTop:10,marginBottom:10}}>
           <div style={{fontWeight:700,color:"#60a5fa",fontSize:16,marginBottom:15}}>
             {mode==="add"?"➕ เพิ่ม Pilot ใหม่":"✏️ แก้ไขข้อมูล Pilot"}
@@ -1656,7 +1658,7 @@ function PilotTab() {
           </button>
         );
         return (
-          <div style={{background:"#fff",borderRadius:"0 0 10px 10px",overflow:"hidden",border:"1px solid #e2e8f0"}}>
+          <div style={{background:"#fff",borderRadius:"0 0 10px 10px",overflow:"visible",border:"1px solid #e2e8f0"}}>
             {/* Tab bar */}
             <div style={{display:"flex",background:"#f8fafc",borderBottom:"1px solid #e2e8f0",padding:"0 8px",gap:2}}>
               {tabBtn("all","รายชื่อนักบินทั้งหมด", shown.length)}
