@@ -1684,7 +1684,8 @@ function PilotTab() {
                   const isDragging = dragIdx===realIdx;
                   const isOver = dragOver===realIdx;
                   return (
-                    <tr key={fi}
+                    <React.Fragment key={fi}>
+                    <tr
                       draggable
                       onDragStart={()=>onDragStart(realIdx)}
                       onDragOver={e=>onDragOver(e,realIdx)}
@@ -1708,15 +1709,71 @@ function PilotTab() {
                         <span style={{background:p.acType==="S-92A"?"#d1fae5":"#e0f2fe",color:p.acType==="S-92A"?"#065f46":"#0369a1",fontWeight:700,fontSize:14,padding:"2px 10px",borderRadius:5}}>{p.acType||"—"}</span>
                       </td>
                       <td style={{padding:"12px 15px",textAlign:"center",fontWeight:800,color:"#7c3aed",fontFamily:"monospace",fontSize:16}}>{p.classNum||"—"}</td>
-                      <td style={{padding:"10px",textAlign:"center"}}>
-                        <div style={{display:"flex",gap:5,justifyContent:"center"}}>
-                          <button onClick={()=>openEdit(realIdx)} style={{padding:"5px 12px",fontSize:14,borderRadius:6,border:"1px solid #3b82f6",background:"transparent",color:"#3b82f6",cursor:"pointer"}}>✏️</button>
-                          <button onClick={()=>setDelIdx(realIdx)} style={{padding:"5px 12px",fontSize:14,borderRadius:6,border:"1px solid #ef4444",background:"transparent",color:"#ef4444",cursor:"pointer"}}>🗑</button>
-                        </div>
+                      <td style={{padding:"10px",textAlign:"center",position:"relative"}}>
+                        <button onClick={()=>setActionMenu(actionMenu===realIdx?null:realIdx)} style={{padding:"6px 12px",fontSize:14,borderRadius:6,border:"1px solid #cbd5e1",background:"#fff",color:"#475569",cursor:"pointer",fontWeight:600}}>จัดการ ▾</button>
+                        {actionMenu === realIdx && (
+                          <div style={{position:"absolute",right:30,top:45,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,boxShadow:"0 4px 15px rgba(0,0,0,0.1)",zIndex:50,display:"flex",flexDirection:"column",minWidth:130,overflow:"hidden"}}>
+                            <button onClick={()=>{ openEdit(realIdx); setActionMenu(null); }} style={{padding:"10px 15px",background:"transparent",border:"none",borderBottom:"1px solid #f1f5f9",textAlign:"left",cursor:"pointer",fontSize:14,color:"#3b82f6",fontWeight:600}}>✏️ แก้ไข</button>
+                            <button onClick={()=>{ setDelIdx(realIdx); setActionMenu(null); }} style={{padding:"10px 15px",background:"transparent",border:"none",textAlign:"left",cursor:"pointer",color:"#ef4444",fontSize:14,fontWeight:600}}>🗑 ลบ</button>
+                          </div>
+                        )}
                       </td>
                     </tr>
-                  );
-                })}
+                    {mode === realIdx && (
+                      <tr>
+                        <td colSpan={11} style={{padding:0}}>
+                          <div style={{background:"#0f2040",padding:"20px",boxShadow:"inset 0 4px 8px rgba(0,0,0,0.3)"}}>
+                            <div style={{fontWeight:700,color:"#60a5fa",fontSize:16,marginBottom:15}}>
+                              ✏️ แก้ไขข้อมูล: {p.rank} {p.name} ({p.callsign})
+                            </div>
+                            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:10,marginBottom:15}}>
+                              <div>
+                                <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>ยศ</div>
+                                <select value={form.rank} onChange={e=>setForm(pf=>({...pf,rank:e.target.value}))} style={inp}>
+                                  {PILOT_RANKS.map(r=><option key={r} value={r}>{r}</option>)}
+                                </select>
+                              </div>
+                              <div>
+                                <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>ชื่อ-นามสกุล</div>
+                                <input value={form.name} onChange={e=>setForm(pf=>({...pf,name:e.target.value}))} style={inp} placeholder="เช่น สมชาย ใจดี"/>
+                              </div>
+                              <div>
+                                <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>ชื่อเล่น</div>
+                                <input value={form.nickname||""} onChange={e=>setForm(pf=>({...pf,nickname:e.target.value}))} style={inp} placeholder="เช่น ชาย"/>
+                              </div>
+                              <div>
+                                <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>ชื่อย่อ (อังกฤษ)</div>
+                                <input value={form.initial} onChange={e=>setForm(pf=>({...pf,initial:e.target.value}))} style={inp} placeholder="เช่น S-CHAI"/>
+                              </div>
+                              <div>
+                                <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>Callsign</div>
+                                <input value={form.callsign} onChange={e=>setForm(pf=>({...pf,callsign:e.target.value}))} style={inp} placeholder="เช่น N-RA"/>
+                              </div>
+                              <div>
+                                <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>รุ่น ชนอ.</div>
+                                <input value={form.classNum||""} onChange={e=>setForm(pf=>({...pf,classNum:e.target.value}))} style={inp} placeholder="เช่น 25"/>
+                              </div>
+                              <div>
+                                <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>เบอร์โทรศัพท์</div>
+                                <input value={form.tel} onChange={e=>setForm(pf=>({...pf,tel:e.target.value}))} style={inp} placeholder="เช่น 081-234-5678"/>
+                              </div>
+                              <div>
+                                <div style={{fontSize:14,color:"var(--text-secondary)",marginBottom:3}}>Type of Aircraft</div>
+                                <select value={form.acType||"S-70i"} onChange={e=>setForm(pf=>({...pf,acType:e.target.value}))} style={inp}>
+                                  {PILOT_AC_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+                              <button onClick={cancel} style={{padding:"8px 20px",fontSize:15,borderRadius:8,border:"1px solid #334155",background:"transparent",color:"#94a3b8",cursor:"pointer"}}>ยกเลิก</button>
+                              <button onClick={save}   style={{padding:"8px 22px",fontSize:15,borderRadius:8,border:"none",background:"#2563eb",color:"#fff",cursor:"pointer",fontWeight:700}}>บันทึก ✓</button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
+                  );})}
               </tbody>
             </table>
             <div style={{padding:"10px 20px",fontSize:14,color:"#94a3b8",borderTop:"1px solid #e2e8f0"}}>
