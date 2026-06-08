@@ -17,7 +17,56 @@ async function saveToSheet(sheetName: string, rows: any[][]) {
   }
 }
 
+const fetchQueue: { sheetName: string, resolve: any, reject: any }[] = [];
+let isFetchingQueue = false;
+
+async function processQueue() {
+  if (isFetchingQueue || fetchQueue.length === 0) return;
+  isFetchingQueue = true;
+  while (fetchQueue.length > 0) {
+    const { sheetName, resolve, reject } = fetchQueue.shift()!;
+    try {
+      const controller = new AbortController();
+      const limit = sheetName === "Flight Schedule 201" ? 90000 : 15000;
+      const timeout = setTimeout(() => controller.abort(), limit);
+      const cacheBuster = new Date().getTime();
+      const res = await fetch(`${GAS_URL}?sheet=${encodeURIComponent(sheetName)}&t=${cacheBuster}`, {
+        signal: controller.signal,
+        cache: "no-store"
+      });
+      clearTimeout(timeout);
+      if (!res.ok) {
+        console.error("[loadFromSheet] HTTP Error", res.status, res.statusText);
+        resolve([]);
+      } else {
+        const text = await res.text();
+        try {
+          const data = JSON.parse(text);
+          resolve(Array.isArray(data) ? data : []);
+        } catch (e) {
+          console.error("[loadFromSheet] Invalid JSON response for", sheetName, text.substring(0,200));
+          resolve([]);
+        }
+      }
+    } catch (e) {
+      console.error("[loadFromSheet] Request failed for", sheetName, e);
+      resolve([]);
+    }
+    // Add 800ms delay between consecutive fetch requests to prevent GAS rate limit
+    await new Promise(r => setTimeout(r, 800));
+  }
+  isFetchingQueue = false;
+}
+
 async function loadFromSheet(sheetName: string): Promise<any[][]> {
+  return new Promise((resolve, reject) => {
+    fetchQueue.push({ sheetName, resolve, reject });
+    processQueue();
+  });
+}
+
+// Old function renamed to not conflict
+async function old_loadFromSheet(sheetName: string): Promise<any[][]> {
   try {
     const controller = new AbortController();
     const limit = sheetName === "Flight Schedule 201" ? 90000 : 15000;
