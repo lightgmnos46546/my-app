@@ -5753,6 +5753,39 @@ function PilotHrsTab() {
         });
     });
 
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    for (let cIdx = 4; cIdx <= 3 + daysInMonth; cIdx++) {
+        const dStr = ws.getCell(2, cIdx).value;
+        const d = parseInt(dStr);
+        if (!isNaN(d)) {
+            const dow = new Date(year, month, d).getDay();
+            let bgColor = null;
+            let fontColor = null;
+            if (dow === 6) { // Sat
+                bgColor = 'FFE8D4FF';
+                fontColor = 'FF8A2BE2';
+            } else if (dow === 0) { // Sun
+                bgColor = 'FFFFD4D4';
+                fontColor = 'FFFF0000';
+            }
+            if (bgColor) {
+                for (let rIdx = 2; rIdx <= ws.rowCount; rIdx++) {
+                    const wsCell = ws.getCell(rIdx, cIdx);
+                    if (rIdx === 2) {
+                        wsCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+                        wsCell.font = { name: 'TH SarabunPSK', size: 16, bold: true, color: { argb: fontColor } };
+                    } else if (wsCell.value && wsCell.value !== '.' && wsCell.value !== '-') {
+                        wsCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+                        wsCell.font = { name: 'TH SarabunPSK', size: 16, bold: true, color: { argb: 'FF000000' } };
+                    } else {
+                        wsCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+                        wsCell.font = { name: 'TH SarabunPSK', size: 16, color: { argb: fontColor } };
+                    }
+                }
+            }
+        }
+    }
+
     const buf = await wb.xlsx.writeBuffer();
     saveAs(new Blob([buf]), `PilotHrs_${acType}_${month+1}_${year}.xlsx`);
   } catch(err) {
@@ -5773,9 +5806,14 @@ function PilotHrsTab() {
             </tr>
             <tr style={{background:"var(--bg-panel)"}}>
               {weeks.map((w,wi) => (
-                w.days.map((d,di) => (
-                  <th key={d} style={{padding:"4px 2px",color:"#94a3b8",fontSize:10,borderRight:(di===w.days.length-1 && wi!==weeks.length-1)?"1px solid #334155":"1px solid rgba(255,255,255,0.05)",borderBottom:"1px solid var(--border-panel)",textAlign:"center",minWidth:22,background:wi%2===0?"rgba(255,255,255,0.02)":"transparent"}}>{d}</th>
-                ))
+                w.days.map((d,di) => {
+                  const dow = new Date(year, month, d).getDay();
+                  const isSat = dow === 6;
+                  const isSun = dow === 0;
+                  return (
+                    <th key={d} style={{padding:"4px 2px",color:isSat?"#c084fc":isSun?"#f87171":"#94a3b8",fontSize:10,borderRight:(di===w.days.length-1 && wi!==weeks.length-1)?"1px solid #334155":"1px solid rgba(255,255,255,0.05)",borderBottom:"1px solid var(--border-panel)",textAlign:"center",minWidth:22,background:isSat?"rgba(192,132,252,0.1)":isSun?"rgba(248,113,113,0.1)":wi%2===0?"rgba(255,255,255,0.02)":"transparent"}}>{d}</th>
+                  )
+                })
               ))}
             </tr>
           </thead>
@@ -5819,8 +5857,11 @@ function PilotHrsTab() {
                   {weeks.map((w,wi) => (
                     w.days.map((d,di) => {
                       const dh = dailyHrs[d];
+                      const dow = new Date(year, month, d).getDay();
+                      const isSat = dow === 6;
+                      const isSun = dow === 0;
                       return (
-                        <td key={d} style={{padding:"4px 2px",textAlign:"center",color:dh>0?"#38bdf8":"#475569",fontSize:12,fontWeight:dh>0?800:400,borderRight:(di===w.days.length-1 && wi!==weeks.length-1)?"1px solid #334155":"1px solid rgba(255,255,255,0.05)",background:wi%2===0?"rgba(255,255,255,0.01)":"transparent"}}>
+                        <td key={d} style={{padding:"4px 2px",textAlign:"center",color:dh>0?"#38bdf8":isSat?"#c084fc":isSun?"#f87171":"#475569",fontSize:12,fontWeight:dh>0?800:400,borderRight:(di===w.days.length-1 && wi!==weeks.length-1)?"1px solid #334155":"1px solid rgba(255,255,255,0.05)",background:isSat?"rgba(192,132,252,0.05)":isSun?"rgba(248,113,113,0.05)":wi%2===0?"rgba(255,255,255,0.01)":"transparent"}}>
                           {dh > 0 ? dh.toFixed(1) : "."}
                         </td>
                       );
