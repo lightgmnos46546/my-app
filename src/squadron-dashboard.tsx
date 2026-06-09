@@ -5198,7 +5198,8 @@ function PostFlightTab() {
   const [editFlight, setEditFlight] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [view, setView] = useState("log"); // log or hours
-  const [viewDate, setViewDate] = useState(new Date());\n  const [expandedRow, setExpandedRow] = useState<number|null>(null);
+  const [viewDate, setViewDate] = useState(new Date());
+  const [expandedRow, setExpandedRow] = useState<number|null>(null);
 
   const parseDateStrHelper = (s) => {
     if (!s) return null;
