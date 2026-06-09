@@ -5232,13 +5232,16 @@ function PostFlightTab() {
       
       const parsePilotForPostFlight = (rows, type) => {
         if (rows.length <= 1) return [];
+        const headers = rows[0];
         return rows.slice(1).map(r => ({
           acType: type,
           rank: r[0] || "",
           name: r[1] || "",
           callsign: r[3] || "",
           initial: r[3] || "",
-          baseHrs: r[8] || "0",
+          baseHrsFallback: r[8] || "0",
+          rawRow: r,
+          headers: headers
         })).filter(p => p.name.trim() !== "");
       };
       setPilots([...parsePilotForPostFlight(pA, "S-92A"), ...parsePilotForPostFlight(pB, "S-70i")]);
@@ -5262,6 +5265,18 @@ function PostFlightTab() {
     ];
     await saveToSheet("POST FLIGHT LOGS", allRows);
     setSyncing(false);
+  };
+
+  const getBaseHrsForViewDate = (pilot, vDate) => {
+    const monthNames = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+    let checkDate = new Date(vDate.getFullYear(), vDate.getMonth() - 1, 1);
+    for (let i = 0; i < 24; i++) {
+      const targetHeader = `TOTAL ${monthNames[checkDate.getMonth()]} ${checkDate.getFullYear()}`;
+      const hIdx = pilot.headers.findIndex(h => h === targetHeader);
+      if (hIdx !== -1) return parseFloat(pilot.rawRow[hIdx]) || 0;
+      checkDate = new Date(checkDate.getFullYear(), checkDate.getMonth() - 1, 1);
+    }
+    return parseFloat(pilot.baseHrsFallback) || 0;
   };
 
   const renderGridTable = (acType, typePilots) => {
@@ -5307,7 +5322,7 @@ function PostFlightTab() {
           </thead>
           <tbody>
             {typePilots.map((p,i) => {
-              const baseHrs = parseFloat(p.baseHrs) || 0;
+              const baseHrs = getBaseHrsForViewDate(p, viewDate);
               
               const pilotLogs = logs.filter(l => {
                 if(!l.date) return false;
