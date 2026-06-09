@@ -5239,7 +5239,7 @@ function PostFlightTab() {
           name: r[1] || "",
           callsign: r[3] || "",
           initial: r[3] || "",
-          baseHrsFallback: r[8] || "0",
+          baseHrsFallback: r[15] || "0",
           rawRow: r,
           headers: headers
         })).filter(p => p.name.trim() !== "");
