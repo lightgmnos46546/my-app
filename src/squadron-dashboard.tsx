@@ -1,6 +1,6 @@
 import React from 'react';
 import { useState, useEffect, useRef, Fragment } from "react";
-import * as XLSX from "xlsx";
+import XLSX from "xlsx-js-style";
 
 // ── Google Sheets Sync ────────────────────────────────────────────────────────
 const GAS_URL = "https://script.google.com/macros/s/AKfycbxZEZnOBoCrRutNrHzvzLbJIuQv_8jbWvHXLJ4O-tjSrabjpXualOZgv8sld3EH8HA5/exec";
@@ -5286,7 +5286,41 @@ function PostFlightTab() {
       <div style={{overflowX:"auto",background:"#0f172a",borderRadius:12,border:"1px solid var(--border-panel)",paddingBottom:10,marginBottom:30}}>
         <div style={{padding:"10px 15px",background:"var(--bg-accent)",borderBottom:"1px solid var(--border-panel)",fontWeight:800,color:acType==="S-92A"?"#a5b4fc":"#6ee7b7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
           <div><span style={{fontSize:18}}>✈️</span> {acType} (จำนวนนักบิน {typePilots.length} นาย)</div>
-          <button onClick={()=>{try{const table = document.getElementById("pilot-hrs-table-" + acType); const wb = XLSX.utils.table_to_book(table); XLSX.writeFile(wb, `PilotHrs_${acType}_${month+1}_${year}.xlsx`);}catch(err){alert("Export Failed: " + err.message);}}} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontWeight:700,fontSize:13}}>📥 Export Excel</button>
+          <button onClick={()=>{try{const table = document.getElementById("pilot-hrs-table-" + acType); 
+              const wb = XLSX.utils.table_to_book(table, {raw:true});
+              const ws = wb.Sheets[wb.SheetNames[0]];
+              
+              // Set column widths
+              const wscols = [{wch: 5}, {wch: 25}, {wch: 8}];
+              for(let i=0; i<31; i++) wscols.push({wch: 4});
+              wscols.push({wch: 10});
+              ws['!cols'] = wscols;
+
+              // Apply styles to all cells
+              const range = XLSX.utils.decode_range(ws['!ref']);
+              for (let R = range.s.r; R <= range.e.r; ++R) {
+                for (let C = range.s.c; C <= range.e.c; ++C) {
+                  const cellAddress = XLSX.utils.encode_cell({r: R, c: C});
+                  if (!ws[cellAddress]) continue;
+                  
+                  const isHeader = R < 2;
+                  
+                  ws[cellAddress].s = {
+                    font: { name: 'TH SarabunPSK', sz: 16, bold: isHeader },
+                    alignment: { vertical: 'center', horizontal: C === 1 && !isHeader ? 'left' : 'center' },
+                    border: {
+                      top: { style: 'thin', color: {rgb:"000000"} },
+                      bottom: { style: 'thin', color: {rgb:"000000"} },
+                      left: { style: 'thin', color: {rgb:"000000"} },
+                      right: { style: 'thin', color: {rgb:"000000"} }
+                    },
+                    fill: isHeader ? { fgColor: {rgb: "D9E1F2"} } : undefined
+                  };
+                }
+              }
+
+              XLSX.writeFile(wb, `PilotHrs_${acType}_${month+1}_${year}.xlsx`);
+}catch(err){alert("Export Failed: " + err.message);}}} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontWeight:700,fontSize:13}}>📥 Export Excel</button>
         </div>
         <table id={"pilot-hrs-table-" + acType} style={{width:"100%",borderCollapse:"collapse",minWidth:1200}}>
           <thead>
