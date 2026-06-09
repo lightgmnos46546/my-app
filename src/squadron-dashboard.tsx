@@ -4471,6 +4471,7 @@ export default function App() {
     {id:"notam",     l:"📡 NOTAM"},
     {id:"flight",    l:"✈️ FLIGHT SCHEDULE"},
     {id:"postflight",l:"📑 POST FLIGHT"},
+    {id:"pilot-hrs", l:"⏱️ PILOT HRS"},
     {id:"duty",      l:"📋 PILOT ON DUTY"},
     {id:"aircraft",  l:"🛩️ AIRCRAFT STATUS"},
     {id:"pilot",     l:"👨‍✈️ รายชื่อนักบิน"},
@@ -4485,6 +4486,7 @@ export default function App() {
     {id:"dashboard", l:"🏠 Dashboard", icon:"🏠"},
     {id:"flight",    l:"✈️ ตารางบิน", icon:"✈️"},
     {id:"postflight",l:"📑 Post Flight", icon:"📑"},
+    {id:"pilot-hrs", l:"⏱️ Pilot Hrs", icon:"⏱️"},
     {id:"duty",      l:"📋 เวรบิน", icon:"📋"},
     {id:"aircraft",  l:"🛩️ เครื่องบิน", icon:"🛩️"},
     {id:"more",      l:"☰ เมนูอื่น", icon:"☰"}
@@ -4642,6 +4644,7 @@ export default function App() {
         {tab==="notam"    &&<NotamTab/>}
         {tab==="flight"   &&<FlightTab onOpenSafety={openSafety}/>}
         {tab==="postflight"&&<PostFlightTab/>}
+        {tab==="pilot-hrs"&&<PilotHrsTab/>}
         {tab==="duty"     &&<DutyTab/>}
         {tab==="aircraft" &&<AcTab/>}
         {tab==="pilot"    &&<PilotTab/>}
