@@ -5354,7 +5354,7 @@ function PostFlightTab() {
   } catch(err) {
     alert("Export Error: " + err.message);
   }
-}} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontWeight:700,fontSize:13}}>📥 Export Excel</button>
+}} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontWeight:700,fontSize:13}}>📥 Export Excel V2</button>
         </div>
         <table id={"pilot-hrs-table-" + acType} style={{width:"100%",borderCollapse:"collapse",minWidth:1200}}>
           <thead>
