@@ -5285,9 +5285,9 @@ function PostFlightTab() {
       <div style={{overflowX:"auto",background:"#0f172a",borderRadius:12,border:"1px solid var(--border-panel)",paddingBottom:10,marginBottom:30}}>
         <div style={{padding:"10px 15px",background:"var(--bg-accent)",borderBottom:"1px solid var(--border-panel)",fontWeight:800,color:acType==="S-92A"?"#a5b4fc":"#6ee7b7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
           <div><span style={{fontSize:18}}>✈️</span> {acType} (จำนวนนักบิน {typePilots.length} นาย)</div>
-          <button onClick={(e)=>{const table = e.currentTarget.closest("div").nextSibling; const wb = XLSX.utils.table_to_book(table); XLSX.writeFile(wb, `PilotHrs_${acType}_${month+1}_${year}.xlsx`);}} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontWeight:700,fontSize:13}}>📥 Export Excel</button>
+          <button onClick={()=>{try{const table = document.getElementById("pilot-hrs-table-" + acType); const wb = XLSX.utils.table_to_book(table); XLSX.writeFile(wb, `PilotHrs_${acType}_${month+1}_${year}.xlsx`);}catch(err){alert("Export Failed: " + err.message);}}} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontWeight:700,fontSize:13}}>📥 Export Excel</button>
         </div>
-        <table style={{width:"100%",borderCollapse:"collapse",minWidth:1200}}>
+        <table id={"pilot-hrs-table-" + acType} style={{width:"100%",borderCollapse:"collapse",minWidth:1200}}>
           <thead>
             <tr style={{background:"var(--bg-panel)"}}>
               <th rowSpan={2} style={{padding:"8px",color:"var(--text-secondary)",fontSize:12,borderRight:"1px solid var(--border-panel)",borderBottom:"1px solid var(--border-panel)"}}>ลำดับ</th>
@@ -5587,9 +5587,9 @@ function PilotHrsTab() {
       <div style={{overflowX:"auto",background:"#0f172a",borderRadius:12,border:"1px solid var(--border-panel)",paddingBottom:10,marginBottom:30}}>
         <div style={{padding:"10px 15px",background:"var(--bg-accent)",borderBottom:"1px solid var(--border-panel)",fontWeight:800,color:acType==="S-92A"?"#a5b4fc":"#6ee7b7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
           <div><span style={{fontSize:18}}>✈️</span> {acType} (จำนวนนักบิน {typePilots.length} นาย)</div>
-          <button onClick={(e)=>{const table = e.currentTarget.closest("div").nextSibling; const wb = XLSX.utils.table_to_book(table); XLSX.writeFile(wb, `PilotHrs_${acType}_${month+1}_${year}.xlsx`);}} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontWeight:700,fontSize:13}}>📥 Export Excel</button>
+          <button onClick={()=>{try{const table = document.getElementById("pilot-hrs-table-" + acType); const wb = XLSX.utils.table_to_book(table); XLSX.writeFile(wb, `PilotHrs_${acType}_${month+1}_${year}.xlsx`);}catch(err){alert("Export Failed: " + err.message);}}} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontWeight:700,fontSize:13}}>📥 Export Excel</button>
         </div>
-        <table style={{width:"100%",borderCollapse:"collapse",minWidth:1200}}>
+        <table id={"pilot-hrs-table-" + acType} style={{width:"100%",borderCollapse:"collapse",minWidth:1200}}>
           <thead>
             <tr style={{background:"var(--bg-panel)"}}>
               <th rowSpan={2} style={{padding:"8px",color:"var(--text-secondary)",fontSize:12,borderRight:"1px solid var(--border-panel)",borderBottom:"1px solid var(--border-panel)"}}>ลำดับ</th>
