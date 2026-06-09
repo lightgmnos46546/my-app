@@ -5450,7 +5450,7 @@ function PostFlightTab() {
                         <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)",whiteSpace:"nowrap"}}>{l.copilot}</td>
                         <td style={{padding:"8px 5px",textAlign:"center",color:"#06b6d4",fontFamily:"monospace",fontWeight:800}}>{l.to}</td>
                         <td style={{padding:"8px 5px",textAlign:"center",color:"#a78bfa",fontFamily:"monospace",fontWeight:800}}>{l.ld}</td>
-                        <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)",fontWeight:800,fontSize:16}}>{l.hrs}</td>
+                        <td style={{padding:"8px 5px",textAlign:"center",color:"var(--text-primary)",fontWeight:800,fontSize:16}}>{l.hrs ? (!isNaN(parseFloat(l.hrs)) ? parseFloat(l.hrs).toFixed(1) : l.hrs) : ""}</td>
                         <td style={{padding:"8px 5px",textAlign:"center",color:"#f87171"}}>{l.discrepancy}</td>
                       </tr>
                       {isExpanded&&(
