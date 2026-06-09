@@ -131,7 +131,7 @@ function parseCSV(text: string): string[][] {
         row.push(cell);
         cell = "";
       } else if (char === '\n' || char === '\r') {
-        if (char === '\r' && nextChar === '\n') {
+        if (char === '\r' && nextChar === '\nimport * as XLSX from "xlsx";\n') {
           i++;
         }
         row.push(cell);
@@ -5270,16 +5270,15 @@ function PostFlightTab() {
     const month = viewDate.getMonth();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     
-    const weeks = [
-      { label: "Week 1", days: [1,2,3,4,5,6,7] },
-      { label: "Week 2", days: [8,9,10,11,12,13,14] },
-      { label: "Week 3", days: [15,16,17,18,19,20,21] },
-      { label: "Week 4", days: [22,23,24,25,26,27,28] },
-    ];
-    if (daysInMonth > 28) {
-      const w5 = [];
-      for(let d=29; d<=daysInMonth; d++) w5.push(d);
-      weeks.push({ label: "Week 5", days: w5 });
+    const weeks = [];
+    let currentWeekDays = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      currentWeekDays.push(d);
+      const dayOfWeek = new Date(year, month, d).getDay();
+      if (dayOfWeek === 0 || d === daysInMonth) {
+        weeks.push({ label: `Week ${weeks.length + 1}`, days: currentWeekDays });
+        currentWeekDays = [];
+      }
     }
 
     return (
@@ -5572,16 +5571,15 @@ function PilotHrsTab() {
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const weeks = [
-      { label: "Week 1", days: [1,2,3,4,5,6,7] },
-      { label: "Week 2", days: [8,9,10,11,12,13,14] },
-      { label: "Week 3", days: [15,16,17,18,19,20,21] },
-      { label: "Week 4", days: [22,23,24,25,26,27,28] },
-    ];
-    if (daysInMonth > 28) {
-      const w5 = [];
-      for(let d=29; d<=daysInMonth; d++) w5.push(d);
-      weeks.push({ label: "Week 5", days: w5 });
+    const weeks = [];
+    let currentWeekDays = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      currentWeekDays.push(d);
+      const dayOfWeek = new Date(year, month, d).getDay();
+      if (dayOfWeek === 0 || d === daysInMonth) {
+        weeks.push({ label: `Week ${weeks.length + 1}`, days: currentWeekDays });
+        currentWeekDays = [];
+      }
     }
 
     return (
