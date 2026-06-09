@@ -1,5 +1,6 @@
 import React from 'react';
 import { useState, useEffect, useRef, Fragment } from "react";
+import * as XLSX from "xlsx";
 
 // ── Google Sheets Sync ────────────────────────────────────────────────────────
 const GAS_URL = "https://script.google.com/macros/s/AKfycbxZEZnOBoCrRutNrHzvzLbJIuQv_8jbWvHXLJ4O-tjSrabjpXualOZgv8sld3EH8HA5/exec";
@@ -131,7 +132,7 @@ function parseCSV(text: string): string[][] {
         row.push(cell);
         cell = "";
       } else if (char === '\n' || char === '\r') {
-        if (char === '\r' && nextChar === '\nimport * as XLSX from "xlsx";\n') {
+        if (char === '\r' && nextChar === '\n') {
           i++;
         }
         row.push(cell);
