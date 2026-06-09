@@ -5412,7 +5412,7 @@ function PostFlightTab() {
               return (
                 <tr key={i} style={{borderBottom:"1px solid var(--border-panel)"}}>
                   <td style={{padding:"8px",textAlign:"center",color:"var(--text-secondary)",borderRight:"1px solid var(--border-panel)",fontSize:12}}>{i+1}</td>
-                  <td style={{padding:"8px",color:"#f8fafc",borderRight:"1px solid var(--border-panel)",fontWeight:600,fontSize:13}}>{p.rank} {p.name} <span style={{color:"var(--text-secondary)",fontSize:11,marginLeft:5}}>({p.callsign})</span></td>
+                  <td style={{padding:"8px",color:"#f8fafc",borderRight:"1px solid var(--border-panel)",fontWeight:600,fontSize:13}}>{p.rank} {p.name}</td>
                   <td style={{padding:"8px",textAlign:"center",color:"#94a3b8",borderRight:"1px solid #334155",fontWeight:700,fontSize:13}}>{baseHrs>0?baseHrs.toFixed(1):"-"}</td>
                   
                   {weeks.map((w,wi) => (
@@ -5780,7 +5780,7 @@ function PilotHrsTab() {
               return (
                 <tr key={i} style={{borderBottom:"1px solid var(--border-panel)"}}>
                   <td style={{padding:"8px",textAlign:"center",color:"var(--text-secondary)",borderRight:"1px solid var(--border-panel)",fontSize:12}}>{i+1}</td>
-                  <td style={{padding:"8px",color:"#f8fafc",borderRight:"1px solid var(--border-panel)",fontWeight:600,fontSize:13}}>{p.rank} {p.name} <span style={{color:"var(--text-secondary)",fontSize:11,marginLeft:5}}>({p.callsign})</span></td>
+                  <td style={{padding:"8px",color:"#f8fafc",borderRight:"1px solid var(--border-panel)",fontWeight:600,fontSize:13}}>{p.rank} {p.name}</td>
                   <td style={{padding:"8px",textAlign:"center",color:"#94a3b8",borderRight:"1px solid #334155",fontWeight:700,fontSize:13}}>{baseHrs>0?baseHrs.toFixed(1):"-"}</td>
                   {weeks.map((w,wi) => (
                     w.days.map((d,di) => {
