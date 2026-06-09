@@ -5349,6 +5349,40 @@ function PostFlightTab() {
         });
     });
 
+    for (let cIdx = 4; cIdx <= 3 + daysInMonth; cIdx++) {
+        const dStr = ws.getCell(2, cIdx).value;
+        const d = parseInt(dStr);
+        if (!isNaN(d)) {
+            const dow = new Date(year, month, d).getDay();
+            let bgColor = null;
+            let fontColor = null;
+            if (dow === 6) { // Sat
+                bgColor = 'FFE8D4FF';
+                fontColor = 'FF8A2BE2';
+            } else if (dow === 0) { // Sun
+                bgColor = 'FFFFD4D4';
+                fontColor = 'FFFF0000';
+            }
+            if (bgColor) {
+                for (let rIdx = 2; rIdx <= ws.rowCount; rIdx++) {
+                    const wsCell = ws.getCell(rIdx, cIdx);
+                    if (rIdx === 2) {
+                        wsCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+                        wsCell.font = { name: 'TH SarabunPSK', size: 16, bold: true, color: { argb: fontColor } };
+                    } else if (wsCell.value && wsCell.value !== '.' && wsCell.value !== '-') {
+                        // Data cell with numbers (fly hours)
+                        wsCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+                        wsCell.font = { name: 'TH SarabunPSK', size: 16, bold: true, color: { argb: 'FF000000' } }; // keep blueish? No, exceljs rgb doesn't map to #38bdf8 directly unless hardcoded, let's just make it bold black for data
+                    } else {
+                        // Empty data cell
+                        wsCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+                        wsCell.font = { name: 'TH SarabunPSK', size: 16, color: { argb: fontColor } };
+                    }
+                }
+            }
+        }
+    }
+
     const buf = await wb.xlsx.writeBuffer();
     saveAs(new Blob([buf]), `PilotHrs_${acType}_${month+1}_${year}.xlsx`);
   } catch(err) {
