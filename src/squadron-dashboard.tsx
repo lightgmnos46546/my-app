@@ -5286,41 +5286,75 @@ function PostFlightTab() {
       <div style={{overflowX:"auto",background:"#0f172a",borderRadius:12,border:"1px solid var(--border-panel)",paddingBottom:10,marginBottom:30}}>
         <div style={{padding:"10px 15px",background:"var(--bg-accent)",borderBottom:"1px solid var(--border-panel)",fontWeight:800,color:acType==="S-92A"?"#a5b4fc":"#6ee7b7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
           <div><span style={{fontSize:18}}>✈️</span> {acType} (จำนวนนักบิน {typePilots.length} นาย)</div>
-          <button onClick={()=>{try{const table = document.getElementById("pilot-hrs-table-" + acType); 
-              const wb = XLSX.utils.table_to_book(table, {raw:true});
-              const ws = wb.Sheets[wb.SheetNames[0]];
-              
-              // Set column widths
-              const wscols = [{wch: 5}, {wch: 25}, {wch: 8}];
-              for(let i=0; i<31; i++) wscols.push({wch: 4});
-              wscols.push({wch: 10});
-              ws['!cols'] = wscols;
+          <button onClick={async ()=>{
+  try {
+    const ExcelJS = (await import('exceljs')).default;
+    const { saveAs } = await import('file-saver');
+    const table = document.getElementById("pilot-hrs-table-" + acType);
+    if (!table) return;
 
-              // Apply styles to all cells
-              const range = XLSX.utils.decode_range(ws['!ref']);
-              for (let R = range.s.r; R <= range.e.r; ++R) {
-                for (let C = range.s.c; C <= range.e.c; ++C) {
-                  const cellAddress = XLSX.utils.encode_cell({r: R, c: C});
-                  if (!ws[cellAddress]) continue;
-                  
-                  const isHeader = R < 2;
-                  
-                  ws[cellAddress].s = {
-                    font: { name: 'TH SarabunPSK', sz: 16, bold: isHeader },
-                    alignment: { vertical: 'center', horizontal: C === 1 && !isHeader ? 'left' : 'center' },
-                    border: {
-                      top: { style: 'thin', color: {rgb:"000000"} },
-                      bottom: { style: 'thin', color: {rgb:"000000"} },
-                      left: { style: 'thin', color: {rgb:"000000"} },
-                      right: { style: 'thin', color: {rgb:"000000"} }
-                    },
-                    fill: isHeader ? { fgColor: {rgb: "D9E1F2"} } : undefined
-                  };
-                }
-              }
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('PilotHrs');
 
-              XLSX.writeFile(wb, `PilotHrs_${acType}_${month+1}_${year}.xlsx`);
-}catch(err){alert("Export Failed: " + err.message);}}} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontWeight:700,fontSize:13}}>📥 Export Excel</button>
+    const mergeCells = [];
+    let rIdx = 1;
+    for (let i = 0; i < table.rows.length; i++) {
+        const row = table.rows[i];
+        const wsRow = ws.getRow(rIdx);
+        let cIdx = 1;
+        for (let j = 0; j < row.cells.length; j++) {
+            const cell = row.cells[j];
+            while (ws.getCell(rIdx, cIdx).isMerged || ws.getCell(rIdx, cIdx).master !== ws.getCell(rIdx, cIdx)) {
+                cIdx++;
+            }
+            const wsCell = ws.getCell(rIdx, cIdx);
+            const text = cell.innerText.trim();
+            const num = parseFloat(text);
+            wsCell.value = (!isNaN(num) && text !== '') ? num : text;
+
+            const rs = cell.rowSpan || 1;
+            const cs = cell.colSpan || 1;
+            if (rs > 1 || cs > 1) {
+                ws.mergeCells(rIdx, cIdx, rIdx + rs - 1, cIdx + cs - 1);
+            }
+            
+            wsCell.font = { name: 'TH SarabunPSK', size: 16, bold: rIdx <= 2 };
+            wsCell.alignment = { vertical: 'middle', horizontal: (cIdx === 2 && rIdx > 2) ? 'left' : 'center' };
+            wsCell.border = {
+                top: { style: 'thin' },
+                left: { style: 'thin' },
+                bottom: { style: 'thin' },
+                right: { style: 'thin' }
+            };
+            if (rIdx <= 2) {
+                wsCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
+            }
+            cIdx += cs;
+        }
+        rIdx++;
+    }
+
+    ws.columns.forEach((col, idx) => {
+        if (idx === 0) col.width = 8;
+        else if (idx === 1) col.width = 35;
+        else if (idx === 2) col.width = 12;
+        else if (idx === ws.columns.length - 1) col.width = 12;
+        else col.width = 6;
+    });
+
+    ws.eachRow((row, rowNumber) => {
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+            if (cell.master === cell) return;
+            cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+        });
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    saveAs(new Blob([buf]), `PilotHrs_${acType}_${month+1}_${year}.xlsx`);
+  } catch(err) {
+    alert("Export Error: " + err.message);
+  }
+}} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontWeight:700,fontSize:13}}>📥 Export Excel</button>
         </div>
         <table id={"pilot-hrs-table-" + acType} style={{width:"100%",borderCollapse:"collapse",minWidth:1200}}>
           <thead>

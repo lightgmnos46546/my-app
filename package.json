@@ -12,6 +12,8 @@
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
+    "file-saver": "^2.0.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "ws": "^8.21.0",
