@@ -335,11 +335,9 @@ const HELO_IMG: Record<string,string> = {
 
 
 const PC = {HIGH:"#ef4444",MED:"#f59e0b",LOW:"#22c55e"};
-const PL = {HIGH:"วิกฤต",MED:"ปานกลาง",LOW:"ทั่วไป"};
 const SB = {FMC:{bg:"#14532d",c:"#86efac"},PMC:{bg:"#713f12",c:"#fde68a"},NMC:{bg:"#7f1d1d",c:"#fca5a5"},INSP:{bg:"#1e3a5f",c:"#93c5fd"}};
-const BC = {"ทอ.":"#3b82f6","ทบ.":"#22c55e","ทร.":"#f59e0b"};
 
-import { Clock, Card, Sec } from "./components/CommonUI";
+import { Clock, Sec } from "./components/CommonUI";
 
 export const formatWeather = (str: string) => {
   if (!str || str === "NIL") return "NIL";
@@ -419,7 +417,7 @@ function validateNotam(block) {
   if (!qM) {
     errors.push("Q) line ไม่ครบหรือผิดรูปแบบ");
   } else {
-    const [,fir,qcode,traffic,purpose,scope,lower,upper,coord] = qM;
+    const [,fir, ,traffic, , ,lower,upper] = qM;
     if (!/^VT[A-Z]{2}$/.test(fir) && fir !== "ZZZZ") warnings.push(`FIR "${fir}" อาจไม่ใช่ Bangkok FIR (VTBB)`);
     if (parseInt(lower) > parseInt(upper)) errors.push(`Q) lower (${lower}) > upper (${upper})`);
     if (!/^(IV|IFR|VFR|K|S|M)/.test(traffic.trim())) warnings.push(`Traffic code "${traffic.trim()}" ผิดปกติ`);
@@ -478,239 +476,7 @@ function validateNotam(block) {
   return { errors, warnings, valid: errors.length === 0 };
 }
 
-// ── Validation Modal ─────────────────────────────────────────────────────────────
-function ValidationModal({ blocks, onConfirm, onCancel }) {
-  // ── validate ทุก block ──
-  const results = blocks.map(b => ({ ...b, ...validateNotam(b) }));
 
-  // ── จัดกลุ่มตาม ICAO (primary location จาก A) field) ──
-  const byAirport = {};
-  for (const r of results) {
-    const primary = r.icaos[0] || "UNKNOWN";
-    if (!byAirport[primary]) byAirport[primary] = [];
-    byAirport[primary].push(r);
-  }
-  const airports = Object.keys(byAirport).sort();
-
-  // สถิติรวม
-  const totalValid   = results.filter(r => r.valid).length;
-  const totalInvalid = results.filter(r => !r.valid).length;
-  const totalWarn    = results.filter(r => r.valid && r.warnings.length > 0).length;
-
-  // state
-  const [selAp,    setSelAp]    = useState(airports[0] || null);  // สนามบินที่กำลังดู
-  const [expanded, setExpanded] = useState(null);
-  const [filter,   setFilter]   = useState("all"); // all | error | warn | ok
-
-  const apResults = selAp ? byAirport[selAp] : [];
-  const apValid   = apResults.filter(r => r.valid).length;
-  const apInvalid = apResults.filter(r => !r.valid).length;
-  const apWarn    = apResults.filter(r => r.valid && r.warnings.length > 0).length;
-
-  const shown = apResults.filter(r => {
-    if (filter === "error") return !r.valid;
-    if (filter === "warn")  return r.valid && r.warnings.length > 0;
-    if (filter === "ok")    return r.valid && r.warnings.length === 0;
-    return true;
-  });
-
-  // สีสถานะสนามบิน
-  const apStatus = (icao) => {
-    const rs = byAirport[icao] || [];
-    if (rs.some(r => !r.valid))                       return { dot:"#ef4444", bg:"rgba(239,68,68,0.1)",   bd:"#ef444444" };
-    if (rs.some(r => r.warnings.length > 0))          return { dot:"#f59e0b", bg:"rgba(245,158,11,0.1)",  bd:"#f59e0b44" };
-    return                                                    { dot:"#22c55e", bg:"rgba(34,197,94,0.08)",  bd:"#22c55e44" };
-  };
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.82)",zIndex:1000,
-      display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"25px",overflowY:"auto"}}>
-      <div style={{background:"#0a1120",border:"1px solid #1e3a5f",borderRadius:18,
-        width:"100%",maxWidth:980,boxShadow:"0 12px 48px #000c",display:"flex",flexDirection:"column"}}>
-
-        {/* ── Modal Header ── */}
-        <div style={{padding:"20px 28px",borderBottom:"1px solid #1e3a5f",display:"flex",alignItems:"center",gap:15}}>
-          <span style={{fontSize:19,fontWeight:800,color:"#e2e8f0",letterSpacing:1}}>🔍 ตรวจสอบ NOTAM ก่อน Import</span>
-          <div style={{flex:1}}/>
-          <div style={{display:"flex",gap:10,fontSize:15}}>
-            <span style={{background:"#14532d",color:"#86efac",padding:"3px 15px",borderRadius:25,fontWeight:700}}>✓ {totalValid}</span>
-            {totalInvalid>0 && <span style={{background:"#7f1d1d",color:"#fca5a5",padding:"3px 15px",borderRadius:25,fontWeight:700}}>✗ {totalInvalid}</span>}
-            {totalWarn>0    && <span style={{background:"#713f12",color:"#fde68a",padding:"3px 15px",borderRadius:25,fontWeight:700}}>⚠ {totalWarn}</span>}
-            <span style={{color:"var(--text-secondary)",fontSize:14,alignSelf:"center"}}>{results.length} รายการ · {airports.length} สนามบิน</span>
-          </div>
-        </div>
-
-        {/* ── Body: sidebar + content ── */}
-        <div style={{display:"flex",flex:1,minHeight:0}}>
-
-          {/* Sidebar — รายชื่อสนามบิน */}
-          <div style={{width:225,flexShrink:0,borderRight:"1px solid #1e293b",overflowY:"auto",
-            maxHeight:"65vh",padding:"12px 10px"}}>
-            <div style={{fontSize:12,color:"var(--text-secondary)",letterSpacing:1,padding:"5px 10px 10px",fontWeight:700}}>สนามบิน</div>
-            {airports.map(icao => {
-              const st  = apStatus(icao);
-              const rs  = byAirport[icao];
-              const cnt = rs.length;
-              const err = rs.filter(r=>!r.valid).length;
-              const ok  = rs.filter(r=>r.valid).length;
-              const isSel = selAp === icao;
-              return (
-                <button key={icao} onClick={()=>{ setSelAp(icao); setExpanded(null); setFilter("all"); }}
-                  style={{width:"100%",textAlign:"left",padding:"10px 12px",borderRadius:10,border:`1px solid ${isSel?st.dot+"88":"transparent"}`,
-                    background:isSel?st.bg:"transparent",cursor:"pointer",marginBottom:5,display:"flex",alignItems:"center",gap:10}}>
-                  <span style={{width:10,height:10,borderRadius:"50%",background:st.dot,flexShrink:0,
-                    boxShadow:isSel?`0 0 6px ${st.dot}`:""}}/>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontFamily:"monospace",fontSize:16,fontWeight:700,color:isSel?st.dot:"#94a3b8"}}>{icao}</div>
-                    <div style={{fontSize:12,color:"var(--text-secondary)"}}>
-                      {err>0?<span style={{color:"#ef4444"}}>✗{err} </span>:null}
-                      <span style={{color:"#22c55e"}}>✓{ok}</span>
-                    </div>
-                  </div>
-                  <span style={{fontSize:12,color:"#334155",fontFamily:"monospace"}}>{cnt}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Main panel */}
-          <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
-
-            {/* Airport header */}
-            {selAp && (
-              <div style={{padding:"15px 22px",borderBottom:"1px solid #1e293b",display:"flex",alignItems:"center",gap:12}}>
-                <span style={{fontFamily:"monospace",fontSize:20,fontWeight:900,color:"#38bdf8"}}>{selAp}</span>
-                <span style={{fontSize:14,color:"var(--text-secondary)"}}>{apResults.length} NOTAM</span>
-                <div style={{display:"flex",gap:5,marginLeft:10}}>
-                  {[
-                    {k:"all",  l:`ทั้งหมด (${apResults.length})`},
-                    {k:"error",l:`Error (${apInvalid})`,  c:"#ef4444"},
-                    {k:"warn", l:`Warning (${apWarn})`,   c:"#f59e0b"},
-                    {k:"ok",   l:`ผ่าน (${apValid})`,     c:"#22c55e"},
-                  ].map(({k,l,c})=>(
-                    <button key={k} onClick={()=>setFilter(k)}
-                      style={{padding:"3px 12px",fontSize:14,borderRadius:6,border:`1px solid ${filter===k?(c||"#38bdf8"):"#1e293b"}`,
-                        background:filter===k?(c||"#38bdf8")+"22":"transparent",
-                        color:filter===k?(c||"#38bdf8"):"var(--text-secondary)",cursor:"pointer",fontWeight:600}}>
-                      {l}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* NOTAM list */}
-            <div style={{flex:1,overflowY:"auto",maxHeight:"55vh",padding:"12px 20px"}}>
-              {shown.length === 0 && (
-                <div style={{textAlign:"center",padding:"38px",color:"var(--text-secondary)",fontSize:16}}>
-                  {selAp ? "ไม่มี NOTAM ที่ตรงเงื่อนไข" : "เลือกสนามบินทางซ้าย"}
-                </div>
-              )}
-              {shown.map((r,i) => {
-                const hasErr = r.errors.length > 0;
-                const hasWrn = r.warnings.length > 0;
-                const color  = hasErr?"#ef4444":hasWrn?"#f59e0b":"#22c55e";
-                const icon   = hasErr?"✗":hasWrn?"⚠":"✓";
-                const isExp  = expanded === r.id+i;
-                return (
-                  <div key={r.id+i} style={{border:`1px solid ${color}33`,borderRadius:10,marginBottom:8,
-                    background:`${color}06`,borderLeft:`3px solid ${color}`}}>
-                    {/* Row */}
-                    <div onClick={()=>setExpanded(isExp?null:r.id+i)}
-                      style={{display:"flex",alignItems:"center",gap:10,padding:"10px 15px",cursor:"pointer",flexWrap:"wrap"}}>
-                      <span style={{fontSize:15,fontWeight:800,color,minWidth:18}}>{icon}</span>
-                      <span style={{fontFamily:"monospace",fontSize:16,fontWeight:700,color:"#38bdf8"}}>{r.id}</span>
-                      <span style={{fontSize:14,padding:"1px 9px",borderRadius:12,background:color+"22",color,fontWeight:700}}>{r.p}</span>
-                      <span style={{fontSize:12,color:"var(--text-secondary)"}}>{r.t}</span>
-                      {r.icaos.length>1 && <span style={{fontSize:12,color:"var(--text-secondary)"}}>→ {r.icaos.slice(1).join(", ")}</span>}
-                      {hasErr && <span style={{fontSize:12,color:"#fca5a5",marginLeft:5}}>
-                        {r.errors.length} error{r.errors.length>1?"s":""}</span>}
-                      {!hasErr&&hasWrn && <span style={{fontSize:12,color:"#fde68a",marginLeft:5}}>
-                        {r.warnings.length} warning{r.warnings.length>1?"s":""}</span>}
-                      <div style={{flex:1}}/>
-                      <span style={{color:"#334155",fontSize:14}}>{isExp?"▲":"▼"}</span>
-                    </div>
-
-                    {/* Expanded detail */}
-                    {isExp && (
-                      <div style={{borderTop:`1px solid ${color}22`,padding:"12px 15px 15px"}}>
-                        {/* Pattern check */}
-                        <div style={{marginBottom:12}}>
-                          <div style={{fontSize:14,color:"#60a5fa",fontWeight:700,marginBottom:8,letterSpacing:1}}>PATTERN CHECK</div>
-                          {[
-                            { field:"Header", ok:!!r.raw.match(/^\(\s*[A-Z]\d{4}\/\d{2}\s+NOTAM[NRC]/),       req:true  },
-                            { field:"Q) FIR/QCODE/TRAFFIC/PURPOSE/SCOPE/LOWER/UPPER/COORD", ok:!!r.raw.match(/Q\)\s*[A-Z]{4}\/Q[A-Z]{4,6}\/[A-Z]+\/[A-Z ]+\/[A-Z ]+\/\d{3}\/\d{3}\/\d{4}[NS]\d{5}[EW]\d{3}/), req:true },
-                            { field:"A) ICAO",  ok:!!r.raw.match(/A\)\s*[A-Z]{4}/),                             req:true  },
-                            { field:"B) YYMMDDHHMM", ok:!!r.raw.match(/B\)\s*\d{10}/),                          req:true  },
-                            { field:"C) END",   ok:!!r.raw.match(/C\)\s*(\d{10}|PERM|EST)/i),                   req:true  },
-                            { field:"E) Text",  ok:!!r.raw.match(/E\)\s*\S{3,}/),                               req:true  },
-                            { field:"D) Schedule", ok:!!r.raw.match(/D\)\s*\S/),                                req:false },
-                            { field:"F) Lower limit", ok:!!r.raw.match(/F\)\s*\S/),                             req:false },
-                            { field:"G) Upper limit", ok:!!r.raw.match(/G\)\s*\S/),                             req:false },
-                          ].map(({field,ok,req})=>(
-                            <div key={field} style={{display:"flex",alignItems:"center",gap:10,padding:"3px 0",
-                              borderBottom:"1px solid #0f172a",fontSize:14}}>
-                              <span style={{color:ok?"#22c55e":req?"#ef4444":"var(--text-secondary)",minWidth:18,flexShrink:0}}>
-                                {ok?"✓":req?"✗":"○"}
-                              </span>
-                              <span style={{color:"var(--text-secondary)",minWidth:250}}>{field}</span>
-                              <span style={{fontSize:12,color:req?"var(--text-secondary)":"#334155"}}>
-                                {req?"required":"optional"}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                        {/* Errors & Warnings */}
-                        {r.errors.map((e,j)=>(
-                          <div key={"e"+j} style={{display:"flex",gap:8,padding:"4px 0",fontSize:14,color:"#fca5a5"}}>
-                            <span>✗</span><span>{e}</span>
-                          </div>
-                        ))}
-                        {r.warnings.map((w,j)=>(
-                          <div key={"w"+j} style={{display:"flex",gap:8,padding:"4px 0",fontSize:14,color:"#fde68a"}}>
-                            <span>⚠</span><span>{w}</span>
-                          </div>
-                        ))}
-                        {/* Raw */}
-                        <div style={{fontSize:12,color:"#334155",marginTop:10,marginBottom:5,fontWeight:700}}>RAW TEXT</div>
-                        <pre style={{margin:0,fontFamily:"monospace",fontSize:14,color:"var(--text-secondary)",
-                          whiteSpace:"pre-wrap",background:"#020817",padding:"12px",borderRadius:8,lineHeight:2}}>
-                          {r.raw}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* ── Footer ── */}
-        <div style={{padding:"18px 28px",borderTop:"1px solid #1e293b",display:"flex",alignItems:"center",gap:12}}>
-          <div style={{flex:1,fontSize:15}}>
-            {totalInvalid>0
-              ? <span style={{color:"#fca5a5"}}>⚠️ {totalInvalid} NOTAM ไม่ผ่าน — จะ import เฉพาะ {totalValid} รายการที่ผ่าน</span>
-              : <span style={{color:"#86efac"}}>✅ ทั้งหมด {totalValid} รายการผ่านการตรวจสอบ พร้อม import</span>
-            }
-          </div>
-          <button onClick={onCancel}
-            style={{padding:"9px 22px",fontSize:15,borderRadius:9,border:"1px solid #334155",
-              background:"transparent",color:"#94a3b8",cursor:"pointer"}}>
-            ยกเลิก
-          </button>
-          <button onClick={()=>onConfirm(results.filter(r=>r.valid))} disabled={totalValid===0}
-            style={{padding:"9px 28px",fontSize:15,borderRadius:9,border:"none",fontWeight:700,
-              background:totalValid>0?"#1d4ed8":"#1e293b",
-              color:totalValid>0?"#fff":"var(--text-secondary)",
-              cursor:totalValid>0?"pointer":"not-allowed"}}>
-            Import {totalValid} NOTAM →
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 function classifyP(q,pur) {
   if(["RT","RR","RD","RW"].some(c=>q.startsWith(c))&&pur.includes("B")) return "HIGH";
   if(["MR","MK","MN","IL","IG","NV","NT","NB","NN","CA","CS","LP","LA"].some(c=>q.startsWith(c))) return "MED";
@@ -2170,7 +1936,7 @@ function FlightForm({init, onSave, onCancel, onDateChange=null}) {
     }
     setF(p=>({...p,[k]:v}));
   };
-  const inp = {background:"#0f172a",border:"1px solid #334155",color:"#e2e8f0",borderRadius:6,padding:"6px 10px",fontSize:15,width:"100%",boxSizing:"border-box"};
+  const inp = {background:"#0f172a",border:"1px solid #334155",color:"#e2e8f0",borderRadius:6,padding:"6px 10px",fontSize:15,width:"100%",boxSizing:"border-box" as const};
   return (
     <div style={{background:"#0f2040",border:"1px solid #2563eb",borderRadius:12,padding:18,marginBottom:18}}>
       <div style={{fontWeight:700,color:"#60a5fa",fontSize:16,marginBottom:15}}>
@@ -2749,110 +2515,7 @@ function generateMonthRows(year, month) {
   return rows;
 }
 
-function NewMonthModal({ onClose, onCreate }) {
-  const now = new Date();
-  const [selYear,  setSelYear]  = useState(now.getFullYear());
-  const [selMonth, setSelMonth] = useState(now.getMonth());
-  // สำหรับกรอกทีละแถว
-  const [rows, setRows] = useState(() => generateMonthRows(now.getFullYear(), now.getMonth()));
-  const [bulkMode, setBulkMode] = useState(false); // false=รายวัน, true=ทั้งเดือน
-  // bulk fields
-  const [bulk, setBulk] = useState({alert:"",sof:"",base:"",d9923:"",csqdn:""});
 
-  const inp = {background:"#0f172a",border:"1px solid #334155",color:"#e2e8f0",borderRadius:5,padding:"5px 9px",fontSize:15,width:"100%",boxSizing:"border-box" as any};
-  const inpSm = {...inp, fontSize:14, padding:"3px 8px"};
-
-  const changeMonth = (yr, mo) => {
-    setSelYear(yr); setSelMonth(mo);
-    setRows(generateMonthRows(yr, mo));
-  };
-  const setRow = (i,k,v) => setRows(p=>p.map((r,idx)=>idx===i?{...r,[k]:v}:r));
-  const applyBulk = () => {
-    setRows(p=>p.map(r=>({
-      ...r,
-      alert: bulk.alert||r.alert,
-      sof:   r.type==="weekday"?(bulk.sof||r.sof):r.sof,
-      base:  bulk.base||r.base,
-      d9923: bulk.d9923||r.d9923,
-      csqdn: bulk.csqdn||r.csqdn,
-    })));
-  };
-
-  const rowBg = t => t==="saturday"?"rgba(168,85,247,0.08)":t==="sunday"?"rgba(239,68,68,0.08)":"transparent";
-  const dayColor = t => t==="saturday"?"#a855f7":t==="sunday"?"#ef4444":"#e2e8f0";
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:1000,display:"flex",alignItems:"flex-start",justifyContent:"center",overflowY:"auto",padding:"20px 0"}}>
-      <div style={{background:"#0f172a",border:"1px solid #1e3a5f",borderRadius:18,width:"95%",maxWidth:1100,padding:24,position:"relative"}}>
-        {/* Header */}
-        <div style={{display:"flex",alignItems:"center",gap:15,marginBottom:25}}>
-          <span style={{fontSize:25}}>📅</span>
-          <div>
-            <div style={{fontWeight:900,fontSize:20,color:"#f1f5f9"}}>สร้างตารางเวรประจำเดือนใหม่</div>
-            <div style={{fontSize:14,color:"var(--text-secondary)"}}>เลือกเดือน จากนั้นกรอกข้อมูลรายวัน หรือกรอกทั้งเดือนในครั้งเดียว</div>
-          </div>
-          <button onClick={onClose} style={{marginLeft:"auto",background:"none",border:"none",color:"var(--text-secondary)",fontSize:28,cursor:"pointer",lineHeight:1}}>✕</button>
-        </div>
-
-        {/* เลือกเดือน/ปี */}
-        <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:20,background:"#1e293b",borderRadius:10,padding:"12px 18px"}}>
-          <span style={{fontSize:15,color:"#94a3b8",fontWeight:700}}>เลือกเดือน:</span>
-          <select value={selMonth} onChange={e=>changeMonth(selYear,Number(e.target.value))}
-            style={{...inp,width:"auto",minWidth:162}}>
-            {MONTH_NAME_TH2.map((m,i)=><option key={i} value={i}>{m}</option>)}
-          </select>
-          <select value={selYear} onChange={e=>changeMonth(Number(e.target.value),selMonth)}
-            style={{...inp,width:"auto",minWidth:112}}>
-            {[2024,2025,2026,2027,2028].map(y=><option key={y} value={y}>{y+543} ({y})</option>)}
-          </select>
-          <span style={{fontSize:15,color:"#38bdf8",fontWeight:700,marginLeft:10}}>
-            {MONTH_NAME_TH2[selMonth]} {selYear+543} · {rows.length} วัน
-          </span>
-        </div>
-
-        {/* ตารางรายวัน */}
-        <div style={{overflowX:"auto",maxHeight:"45vh",overflowY:"auto",borderRadius:10,border:"1px solid #1e3a5f"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:14}}>
-            <thead style={{position:"sticky",top:0,zIndex:2}}>
-              <tr style={{background:"#4f46e5"}}>
-                {["DAY","DATE","ALERT","SOF","BASE OPS.","อบรม","9923","C SQDN","REMARK"].map(h=>(
-                  <th key={h} style={{padding:"9px 10px",color:"#fff",fontWeight:800,textAlign:"center",whiteSpace:"nowrap",borderRight:"1px solid #4338ca"}}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r,i)=>(
-                <tr key={i} style={{background:rowBg(r.type),borderBottom:"1px solid #1e293b"}}>
-                  <td style={{padding:"5px 10px",textAlign:"center",fontWeight:700,color:dayColor(r.type),whiteSpace:"nowrap"}}>{r.daySh||r.day.slice(0,3).toUpperCase()}</td>
-                  <td style={{padding:"5px 8px",minWidth:138}}>
-                    <DatePicker value={r.date} onChange={v=>setRow(i,"date",v)} dark={true}/>
-                  </td>
-                  {["alert","sof","base","topic","d9923","csqdn","rmk"].map(k=>(
-                    <td key={k} style={{padding:"3px 6px",minWidth:100}}>
-                      <input value={r[k]||""} onChange={e=>setRow(i,k,e.target.value)} style={inpSm}/>
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Footer */}
-        <div style={{display:"flex",gap:12,justify:"flex-end",marginTop:20}}>
-          <button onClick={onClose}
-            style={{padding:"10px 25px",fontSize:16,borderRadius:9,border:"1px solid #334155",background:"transparent",color:"#94a3b8",cursor:"pointer"}}>
-            ยกเลิก
-          </button>
-          <button onClick={()=>onCreate(rows, selYear, selMonth)}
-            style={{padding:"10px 30px",fontSize:16,borderRadius:9,border:"none",background:"#4f46e5",color:"#fff",cursor:"pointer",fontWeight:800}}>
-            ✓ สร้างตารางเวร {MONTH_NAME_TH2[selMonth]} {selYear+543}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Duty Sheet loader (new sheet ID) ─────────────────────────────────────────
 const DUTY_SHEET_ID = "1NLqQWzaiLU7x0Q5WOU9qhdZRSaCsfpYjldc9w3QKE-8";
@@ -3189,7 +2852,7 @@ function AcForm({init, isGroupA, onSave, onCancel}) {
         {/* STATUS */}
         <div>{lbl("สถานะ")}
           <select value={f.status} onChange={e=>set("status",e.target.value)} style={inp}>
-            {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+            {["FMC", "PMC", "NMC", "INSP"].map(s=><option key={s} value={s}>{s}</option>)}
           </select>
         </div>
         {/* ชั่วโมง */}
@@ -4575,7 +4238,7 @@ export default function App() {
               display: "flex",
               alignItems: "center",
               padding: "0 4px",
-              boxSizing: "border-box",
+              boxSizing: "border-box" as const,
               boxShadow: "inset 0 2px 4px rgba(0,0,0,0.1)",
               transition: "background-color 0.3s ease",
               flexShrink: 0
@@ -5290,7 +4953,7 @@ function PostFlightTab() {
   try {
     const ExcelJS = (await import('exceljs')).default;
     const { saveAs } = await import('file-saver');
-    const table = document.getElementById("pilot-hrs-table-" + acType);
+    const table = document.getElementById("pilot-hrs-table-" + acType) as HTMLTableElement;
     if (!table) return;
 
     const wb = new ExcelJS.Workbook();
@@ -5351,7 +5014,7 @@ function PostFlightTab() {
 
     for (let cIdx = 4; cIdx <= 3 + daysInMonth; cIdx++) {
         const dStr = ws.getCell(2, cIdx).value;
-        const d = parseInt(dStr);
+        const d = parseInt(dStr as string);
         if (!isNaN(d)) {
             const dow = new Date(year, month, d).getDay();
             let bgColor = null;
@@ -5694,7 +5357,7 @@ function PilotHrsTab() {
   try {
     const ExcelJS = (await import('exceljs')).default;
     const { saveAs } = await import('file-saver');
-    const table = document.getElementById("pilot-hrs-table-" + acType);
+    const table = document.getElementById("pilot-hrs-table-" + acType) as HTMLTableElement;
     if (!table) return;
 
     const wb = new ExcelJS.Workbook();
@@ -5756,7 +5419,7 @@ function PilotHrsTab() {
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     for (let cIdx = 4; cIdx <= 3 + daysInMonth; cIdx++) {
         const dStr = ws.getCell(2, cIdx).value;
-        const d = parseInt(dStr);
+        const d = parseInt(dStr as string);
         if (!isNaN(d)) {
             const dow = new Date(year, month, d).getDay();
             let bgColor = null;

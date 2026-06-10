@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-export default function HeloImg({ src, alt }: { src: string; alt: string }) {
+export default function HeloImg({ src }: { src: string; alt?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   useEffect(() => {

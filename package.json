@@ -32,6 +32,7 @@
     "gh-pages": "^6.3.0",
     "globals": "^16.0.0",
     "typescript": "~5.8.3",
+    "typescript-eslint": "^8.61.0",
     "uipro-cli": "^2.2.3",
     "vite": "^6.3.5"
   }

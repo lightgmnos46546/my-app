@@ -4,7 +4,7 @@ const MONTH_TH = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","
 const MONTH_EN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const DAY_TH   = ["อา","จ","อ","พ","พฤ","ศ","ส"];
 
-export default function DatePicker({ value, onChange, dark=true }: { value: string; onChange: (v: string) => void; dark?: boolean }) {
+export default function DatePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen]   = useState(false);
   const today = new Date();
   
