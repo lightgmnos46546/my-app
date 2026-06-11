@@ -5,58 +5,163 @@ import XLSX from "xlsx-js-style";
 // ── Google Sheets Sync ────────────────────────────────────────────────────────
 const GAS_URL = "https://script.google.com/macros/s/AKfycbxZEZnOBoCrRutNrHzvzLbJIuQv_8jbWvHXLJ4O-tjSrabjpXualOZgv8sld3EH8HA5/exec";
 
+// ── Auth / Session ────────────────────────────────────────────────────────────
+// ทำงานเต็มรูปแบบเมื่อฝั่ง GAS ตั้ง REQUIRE_AUTH=true (ดู gas/SETUP.md)
+// ถ้า GAS ยังเป็นเวอร์ชันเก่า/ปิด auth อยู่ ระบบจะทำงานแบบเปิดเหมือนเดิมทุกอย่าง
+
+type Session = { token: string; user: string; display: string; role: string; exp: number };
+const SESSION_KEY = "soms_session";
+const AUTH_FLAG_KEY = "soms_auth_enabled";
+const sheetVersions: Record<string, number> = {}; // เวอร์ชันล่าสุดของแต่ละชีทที่โหลดมา (กันเขียนทับกัน)
+
+function getSession(): Session | null {
+  try {
+    const s = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    if (s && s.token && s.exp > Date.now()) return s;
+  } catch {}
+  return null;
+}
+function setSessionLS(s: Session | null) {
+  if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+  else localStorage.removeItem(SESSION_KEY);
+}
+function authToken(): string {
+  return getSession()?.token || "";
+}
+function notifyUnauthorized() {
+  setSessionLS(null);
+  window.dispatchEvent(new Event("soms-unauthorized"));
+}
+
+async function fetchAuthStatus(): Promise<boolean> {
+  try {
+    const res = await fetch(`${GAS_URL}?action=authStatus&t=${Date.now()}`, { cache: "no-store" });
+    const j = await res.json();
+    if (j && typeof j.authEnabled === "boolean") {
+      localStorage.setItem(AUTH_FLAG_KEY, j.authEnabled ? "1" : "0");
+      return j.authEnabled;
+    }
+  } catch {}
+  // เช็คไม่ได้ (GAS เก่า/เน็ตล่ม) → ใช้ค่าที่จำไว้ — ฝั่ง server เป็นคนบังคับจริงอยู่แล้ว
+  return localStorage.getItem(AUTH_FLAG_KEY) === "1";
+}
+
+async function gasLogin(username: string, pin: string): Promise<any> {
+  const res = await fetch(GAS_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({ action: "login", username, pin }),
+  });
+  return JSON.parse(await res.text());
+}
+
+function gasLogout() {
+  const s = getSession();
+  if (s) {
+    fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "logout", token: s.token }),
+    }).catch(() => {});
+  }
+  setSessionLS(null);
+}
+
 async function saveToSheet(sheetName: string, rows: any[][]) {
+  // viewer ถูกกันตั้งแต่ฝั่งนี้ (server ปฏิเสธซ้ำอีกชั้นอยู่แล้ว)
+  const sess = getSession();
+  if (localStorage.getItem(AUTH_FLAG_KEY) === "1" && sess && sess.role === "viewer") {
+    alert("⛔ สิทธิ์ของคุณเป็นผู้ชมอย่างเดียว (viewer) ไม่สามารถบันทึก/แก้ไขข้อมูลได้");
+    return;
+  }
+  delete sheetCache[sheetName]; // ข้อมูลในชีทเปลี่ยนแล้ว — ล้าง cache กันอ่านค่าเก่า
   try {
     const res = await fetch(GAS_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ sheet: sheetName, data: rows }),
+      body: JSON.stringify({
+        sheet: sheetName, data: rows,
+        token: authToken() || undefined,
+        baseVersion: sheetVersions[sheetName],
+      }),
     });
-    console.log("saveToSheet", sheetName, await res.text());
+    const text = await res.text();
+    console.log("saveToSheet", sheetName, text);
+    try {
+      const r = JSON.parse(text);
+      if (r && r.error === "conflict") {
+        alert("⚠️ บันทึกไม่สำเร็จ: มีผู้ใช้คนอื่นแก้ไขข้อมูลชีทนี้ไปก่อนหน้า\nกรุณารีโหลดหน้าเพื่อดูข้อมูลล่าสุด แล้วทำรายการอีกครั้ง");
+        return;
+      }
+      if (r && r.error === "forbidden") {
+        alert("⛔ สิทธิ์ของคุณไม่เพียงพอสำหรับการบันทึกข้อมูล");
+        return;
+      }
+      if (r && r.error === "unauthorized") { notifyUnauthorized(); return; }
+      if (r && r.ok && typeof r.v === "number") sheetVersions[sheetName] = r.v;
+    } catch {} // GAS เวอร์ชันเก่าตอบเป็นข้อความธรรมดา — ถือว่าสำเร็จแบบเดิม
   } catch (e) {
     console.error("Save failed", e);
   }
 }
 
 const fetchQueue: { sheetName: string, resolve: any, reject: any }[] = [];
-let isFetchingQueue = false;
+const MAX_CONCURRENT_FETCHES = 3; // ยิงขนานได้สูงสุด 3 request (เดิมต่อคิวทีละตัว)
+let activeFetchCount = 0;
 
-async function processQueue() {
-  if (isFetchingQueue || fetchQueue.length === 0) return;
-  isFetchingQueue = true;
-  while (fetchQueue.length > 0) {
-    const { sheetName, resolve, reject } = fetchQueue.shift()!;
-    try {
-      const controller = new AbortController();
-      const limit = sheetName === "Flight Schedule 201" ? 90000 : 15000;
-      const timeout = setTimeout(() => controller.abort(), limit);
-      const cacheBuster = new Date().getTime();
-      const res = await fetch(`${GAS_URL}?sheet=${encodeURIComponent(sheetName)}&t=${cacheBuster}`, {
-        signal: controller.signal,
-        cache: "no-store"
-      });
-      clearTimeout(timeout);
-      if (!res.ok) {
-        console.error("[loadFromSheet] HTTP Error", res.status, res.statusText);
-        resolve([]);
-      } else {
-        const text = await res.text();
-        try {
-          const data = JSON.parse(text);
-          resolve(Array.isArray(data) ? data : []);
-        } catch (e) {
-          console.error("[loadFromSheet] Invalid JSON response for", sheetName, text.substring(0,200));
+// In-memory cache + in-flight dedupe — สลับแท็บไปมาไม่ต้องยิงชีทเดิมซ้ำ
+const sheetCache: Record<string, { time: number, data: any[][] }> = {};
+const SHEET_CACHE_TTL = 60000; // 60 วินาที
+const inflightFetches: Record<string, Promise<any[][]>> = {};
+
+function processQueue() {
+  while (activeFetchCount < MAX_CONCURRENT_FETCHES && fetchQueue.length > 0) {
+    const { sheetName, resolve } = fetchQueue.shift()!;
+    activeFetchCount++;
+    (async () => {
+      try {
+        const controller = new AbortController();
+        const limit = sheetName === "Flight Schedule 201" ? 90000 : 15000;
+        const timeout = setTimeout(() => controller.abort(), limit);
+        const cacheBuster = new Date().getTime();
+        const tok = authToken();
+        const res = await fetch(`${GAS_URL}?sheet=${encodeURIComponent(sheetName)}&t=${cacheBuster}&withMeta=1${tok?`&token=${encodeURIComponent(tok)}`:""}`, {
+          signal: controller.signal,
+          cache: "no-store"
+        });
+        clearTimeout(timeout);
+        if (!res.ok) {
+          console.error("[loadFromSheet] HTTP Error", res.status, res.statusText);
           resolve([]);
+        } else {
+          const text = await res.text();
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
+              // GAS v2: {v: เวอร์ชัน, data: [...]} หรือ {error: ...}
+              if (parsed.error === "unauthorized") { notifyUnauthorized(); resolve([]); }
+              else if (Array.isArray(parsed.data)) {
+                if (typeof parsed.v === "number") sheetVersions[sheetName] = parsed.v;
+                resolve(parsed.data);
+              }
+              else resolve([]);
+            } else {
+              resolve(Array.isArray(parsed) ? parsed : []); // GAS เวอร์ชันเก่า — array ตรงๆ
+            }
+          } catch (e) {
+            console.error("[loadFromSheet] Invalid JSON response for", sheetName, text.substring(0,200));
+            resolve([]);
+          }
         }
+      } catch (e) {
+        console.error("[loadFromSheet] Request failed for", sheetName, e);
+        resolve([]);
+      } finally {
+        activeFetchCount--;
+        processQueue();
       }
-    } catch (e) {
-      console.error("[loadFromSheet] Request failed for", sheetName, e);
-      resolve([]);
-    }
-    // Add 800ms delay between consecutive fetch requests to prevent GAS rate limit
-    // Removed artificial delay for faster loading
+    })();
   }
-  isFetchingQueue = false;
 }
 
 
@@ -65,7 +170,8 @@ async function loadDashboardData() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
     const cacheBuster = new Date().getTime();
-    const res = await fetch(`${GAS_URL}?action=getDashboard&t=${cacheBuster}`, {
+    const tok = authToken();
+    const res = await fetch(`${GAS_URL}?action=getDashboard&t=${cacheBuster}${tok?`&token=${encodeURIComponent(tok)}`:""}`, {
       signal: controller.signal,
       cache: "no-store"
     });
@@ -73,6 +179,7 @@ async function loadDashboardData() {
     if (!res.ok) return null;
     const text = await res.text();
     const data = JSON.parse(text);
+    if (data && data.error === "unauthorized") { notifyUnauthorized(); return null; }
     return data;
   } catch (e) {
     console.error("Dashboard consolidated fetch failed", e);
@@ -81,10 +188,32 @@ async function loadDashboardData() {
 }
 
 async function loadFromSheet(sheetName: string): Promise<any[][]> {
-  return new Promise((resolve, reject) => {
-    fetchQueue.push({ sheetName, resolve, reject });
+  // cache hit (อายุไม่เกิน TTL) → คืนสำเนาทันที ไม่ยิง network
+  const hit = sheetCache[sheetName];
+  if (hit && Date.now() - hit.time < SHEET_CACHE_TTL) {
+    return structuredClone(hit.data);
+  }
+  // ชีทเดียวกันกำลังโหลดอยู่แล้ว → รอผลตัวเดิม ไม่ยิงซ้ำ
+  if (sheetName in inflightFetches) {
+    return inflightFetches[sheetName].then(d => structuredClone(d));
+  }
+  const p = new Promise<any[][]>((resolve, reject) => {
+    fetchQueue.push({
+      sheetName,
+      resolve: (data: any[][]) => {
+        if (Array.isArray(data) && data.length > 0) {
+          sheetCache[sheetName] = { time: Date.now(), data };
+        }
+        resolve(data);
+      },
+      reject
+    });
     processQueue();
   });
+  inflightFetches[sheetName] = p;
+  p.finally(() => { delete inflightFetches[sheetName]; });
+  // คืนสำเนาเสมอ — กัน caller แก้ array แล้วข้อมูลใน cache เพี้ยน
+  return p.then(d => structuredClone(d));
 }
 
 // Old function renamed to not conflict
@@ -2605,6 +2734,138 @@ const DAY_CLR: Record<string,string> = {
   THURSDAY:"#f97316", FRIDAY:"#06b6d4", SATURDAY:"#a855f7", SUNDAY:"#ef4444"
 };
 
+// ── จัดเวร: เขียนลงสเปรดชีตเวรไฟล์เดิมผ่าน GAS (เจาะจงเซลล์ ไม่ทับทั้งชีท) ──────
+async function gasUpdateDuty(dateStr: string, fields: any): Promise<any> {
+  // dateStr รูปแบบ "11 JUN 2026"
+  const p = dateStr.trim().split(/\s+/);
+  const m = MONTH_UPPER.indexOf((p[1] || "").toUpperCase()) + 1;
+  try {
+    const res = await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({
+        action: "updateDuty",
+        token: authToken() || undefined,
+        date: { y: +p[2], m, d: +p[0] },
+        fields,
+      }),
+    });
+    try { return JSON.parse(await res.text()); }
+    catch { return { error: "old-gas" }; } // GAS เก่าตอบไม่ใช่ JSON ของ action นี้
+  } catch {
+    return { error: "network" };
+  }
+}
+
+// ฟอร์มจัดเวร — แก้ได้เฉพาะคอลัมน์ที่แอปรู้จัก คอลัมน์อื่นในชีทไม่ถูกแตะ
+function DutyForm({ init, rows, onSave, onCancel, saving }:
+  { init: any; rows: any[]; onSave: (f: any) => void; onCancel: () => void; saving: boolean }) {
+  const [f, setF] = useState(init);
+
+  const toPicker = (ds: string) => {
+    const p = ds.trim().split(/\s+/);
+    return `${p[0]} ${(p[1]||"").charAt(0)}${(p[1]||"").slice(1).toLowerCase()} ${p[2]}`;
+  };
+  const fromPicker = (v: string) => {
+    const p = v.trim().split(/\s+/);
+    return `${parseInt(p[0])} ${(p[1]||"").toUpperCase()} ${p[2]}`;
+  };
+  const prefill = (ds: string) => {
+    const r = rows.find(x => x.dateStr === ds);
+    return {
+      dateStr: ds,
+      found: !!r,
+      alert: r?.alert || "", sof: r?.sof || "",
+      baseops: (r?.baseops === "-" ? "" : r?.baseops) || "",
+      emerBrief: r?.emerBrief || "", remark: r?.remark || "",
+      det9923: (r?.det9923 || "").split(" - ").concat(["", "", ""]).slice(0, 3),
+      cSqdn: (r?.cSqdn || "").split(" - ").concat(["", "", "", ""]).slice(0, 4),
+    };
+  };
+
+  const inp: React.CSSProperties = {
+    width: "100%", boxSizing: "border-box", background: "var(--bg-panel-solid)",
+    border: "1px solid var(--border-panel)", color: "var(--text-primary)",
+    borderRadius: 10, padding: "9px 12px", fontSize: 15, outline: "none",
+  };
+  const Label = ({ text, c }: { text: string; c: string }) => (
+    <div style={{ fontSize: 11.5, color: c, fontWeight: 800, letterSpacing: "0.05em", marginBottom: 5 }}>{text}</div>
+  );
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:2000,background:"rgba(0,0,0,0.5)",backdropFilter:"blur(6px)",WebkitBackdropFilter:"blur(6px)",
+      display:"flex",alignItems:"center",justifyContent:"center",padding:16,overflowY:"auto"}}
+      onClick={onCancel}>
+      <div className="glass-panel animate-scale-in" onClick={e=>e.stopPropagation()}
+        style={{width:"100%",maxWidth:560,maxHeight:"92vh",overflowY:"auto",borderRadius:"var(--radius-xl)",
+          padding:"clamp(18px, 3vw, 26px)",background:"var(--bg-panel-solid)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:16}}>
+          <div style={{fontSize:18,fontWeight:800}}>✏️ จัดเวรประจำวัน</div>
+          <button onClick={onCancel} style={{background:"var(--bg-card)",border:"1px solid var(--border-panel)",
+            color:"var(--text-secondary)",width:32,height:32,borderRadius:"50%",cursor:"pointer",fontSize:13,
+            display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>✕</button>
+        </div>
+
+        <div style={{marginBottom:14}}>
+          <Label text="วันที่" c="var(--accent-color)"/>
+          <DatePicker value={toPicker(f.dateStr)} onChange={(v)=>setF(prefill(fromPicker(v)))}/>
+          {!f.found&&(
+            <div style={{marginTop:8,background:"rgba(255,159,10,0.1)",border:"1px solid rgba(255,159,10,0.35)",
+              color:"#ff9f0a",borderRadius:10,padding:"8px 12px",fontSize:13,fontWeight:600}}>
+              ⚠️ ไม่พบวันที่นี้ในชีทเวร — ต้องมีแถววันที่ในสเปรดชีตเวรก่อนจึงจะจัดเวรได้
+            </div>
+          )}
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:12,marginBottom:14}}>
+          <div><Label text="ALERT" c="#ef4444"/><input style={inp} value={f.alert} onChange={e=>setF({...f,alert:e.target.value})}/></div>
+          <div><Label text="SOF" c="#f97316"/><input style={inp} value={f.sof} onChange={e=>setF({...f,sof:e.target.value})}/></div>
+          <div><Label text="BASE OPS." c="#06b6d4"/><input style={inp} value={f.baseops} onChange={e=>setF({...f,baseops:e.target.value})}/></div>
+          <div><Label text="EMER BRIEF" c="#a855f7"/><input style={inp} value={f.emerBrief} onChange={e=>setF({...f,emerBrief:e.target.value})}/></div>
+        </div>
+
+        <div style={{marginBottom:14}}>
+          <Label text="9923 DETACHMENT (3 นาย)" c="#eab308"/>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:8}}>
+            {f.det9923.map((v:string,i:number)=>(
+              <input key={i} style={inp} value={v} placeholder={`นายที่ ${i+1}`}
+                onChange={e=>{const a=[...f.det9923];a[i]=e.target.value;setF({...f,det9923:a});}}/>
+            ))}
+          </div>
+        </div>
+
+        <div style={{marginBottom:14}}>
+          <Label text="C SQUADRON (4 นาย)" c="#22c55e"/>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(110px, 1fr))",gap:8}}>
+            {f.cSqdn.map((v:string,i:number)=>(
+              <input key={i} style={inp} value={v} placeholder={`นายที่ ${i+1}`}
+                onChange={e=>{const a=[...f.cSqdn];a[i]=e.target.value;setF({...f,cSqdn:a});}}/>
+            ))}
+          </div>
+        </div>
+
+        <div style={{marginBottom:18}}>
+          <Label text="REMARK" c="var(--text-secondary)"/>
+          <input style={inp} value={f.remark} onChange={e=>setF({...f,remark:e.target.value})}/>
+        </div>
+
+        <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+          <button onClick={onCancel} disabled={saving}
+            style={{background:"var(--bg-card)",border:"1px solid var(--border-panel)",color:"var(--text-secondary)",
+              borderRadius:11,padding:"11px 22px",fontSize:14.5,fontWeight:700,cursor:"pointer"}}>ยกเลิก</button>
+          <button onClick={()=>onSave(f)} disabled={saving||!f.found}
+            style={{background:"linear-gradient(160deg,var(--accent-color),var(--accent-secondary))",border:"none",color:"#fff",
+              borderRadius:11,padding:"11px 26px",fontSize:14.5,fontWeight:800,cursor:"pointer",
+              opacity:(saving||!f.found)?0.55:1,display:"flex",alignItems:"center",gap:8}}>
+            {saving&&<span className="spinner" style={{width:13,height:13,borderColor:"rgba(255,255,255,0.35)",borderTopColor:"#fff"}}></span>}
+            {saving?"กำลังบันทึก...":"💾 บันทึกเวร"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DutyTab({ theme }: { theme?: string }) {
   const [view, setView]           = useState("daily");
   const [rows, setRows]           = useState<any[]>([]);
@@ -2612,6 +2873,63 @@ function DutyTab({ theme }: { theme?: string }) {
   const [loadErr, setLoadErr]     = useState<string|null>(null);
   const [attempt, setAttempt]     = useState(0);
   const [toast, setToast]         = useState<string|null>(null);
+  // Monthly view (ปฏิทิน) — state การแสดงผลล้วนๆ ไม่กระทบการโหลด/บันทึก
+  const [calDate, setCalDate]     = useState(() => { const t = new Date(); return new Date(t.getFullYear(), t.getMonth(), 1); });
+  const [selDate, setSelDate]     = useState(() => { const t = new Date(); return `${t.getDate()} ${MONTH_UPPER[t.getMonth()]} ${t.getFullYear()}`; });
+  const [monthlyMode, setMonthlyMode] = useState<"cal"|"table">("cal");
+
+  // จัดเวร
+  const [dutyForm, setDutyForm]   = useState<any>(null); // null = ปิดฟอร์ม
+  const [dutySaving, setDutySaving] = useState(false);
+  const sess = getSession();
+  const canEditDuty = !(localStorage.getItem(AUTH_FLAG_KEY) === "1" && sess?.role === "viewer");
+
+  const openDutyForm = (ds: string) => {
+    const r = rows.find(x => x.dateStr === ds);
+    setDutyForm({
+      dateStr: ds,
+      found: !!r,
+      alert: r?.alert || "", sof: r?.sof || "",
+      baseops: (r?.baseops === "-" ? "" : r?.baseops) || "",
+      emerBrief: r?.emerBrief || "", remark: r?.remark || "",
+      det9923: (r?.det9923 || "").split(" - ").concat(["", "", ""]).slice(0, 3),
+      cSqdn: (r?.cSqdn || "").split(" - ").concat(["", "", "", ""]).slice(0, 4),
+    });
+  };
+
+  const saveDuty = async (f: any) => {
+    setDutySaving(true);
+    const r = await gasUpdateDuty(f.dateStr, {
+      alert: f.alert.trim(), sof: f.sof.trim(), baseops: f.baseops.trim(),
+      emerBrief: f.emerBrief.trim(), remark: f.remark.trim(),
+      det9923: f.det9923.map((x: string) => x.trim()),
+      cSqdn: f.cSqdn.map((x: string) => x.trim()),
+    });
+    setDutySaving(false);
+    if (r && r.ok) {
+      // อัปเดตหน้าจอทันที (gviz CSV อาจ cache สักครู่ — ค่าจริงบันทึกแล้ว)
+      setRows(rs => rs.map(x => x.dateStr === f.dateStr ? {
+        ...x,
+        alert: f.alert.trim(), sof: f.sof.trim(),
+        baseops: f.baseops.trim() || "-",
+        emerBrief: f.emerBrief.trim(), remark: f.remark.trim(),
+        det9923: f.det9923.map((s: string) => s.trim()).filter(Boolean).join(" - "),
+        cSqdn: f.cSqdn.map((s: string) => s.trim()).filter(Boolean).join(" - "),
+      } : x));
+      setDutyForm(null);
+      showToast("✓ บันทึกเวรเรียบร้อย");
+    } else if (r && r.error === "date-not-found") {
+      alert("⚠️ ไม่พบวันที่นี้ในชีทเวร — ต้องมีแถววันที่ในสเปรดชีตเวรก่อน");
+    } else if (r && r.error === "forbidden") {
+      alert("⛔ สิทธิ์ของคุณไม่เพียงพอสำหรับการจัดเวร");
+    } else if (r && r.error === "unauthorized") {
+      notifyUnauthorized();
+    } else if (r && r.error === "duty-sheet-access") {
+      alert("⛔ สคริปต์ GAS เข้าถึงสเปรดชีตเวรไม่ได้ — ตรวจสิทธิ์แก้ไขของบัญชีที่รัน GAS (ดู gas/SETUP.md)");
+    } else {
+      alert("⚠️ บันทึกไม่สำเร็จ — ฝั่งเซิร์ฟเวอร์อาจยังไม่ได้อัปเดต Code.gs เวอร์ชันล่าสุด (ดู gas/SETUP.md)");
+    }
+  };
 
   const showToast = (m:string) => { setToast(m); setTimeout(()=>setToast(null),3000); };
 
@@ -2656,8 +2974,13 @@ function DutyTab({ theme }: { theme?: string }) {
 
   return (
     <div style={{background:"transparent",minHeight:"80vh"}}>
-      {toast&&<div style={{position:"fixed",top:20,right:24,zIndex:999,background:"#22c55e",color:"#fff",
+      {toast&&<div style={{position:"fixed",top:20,right:24,zIndex:2100,background:"#22c55e",color:"#fff",
         padding:"12px 25px",borderRadius:10,fontWeight:700,fontSize:16,boxShadow:"0 4px 12px #0004"}}>{toast}</div>}
+
+      {dutyForm&&(
+        <DutyForm init={dutyForm} rows={rows} saving={dutySaving}
+          onSave={saveDuty} onCancel={()=>{if(!dutySaving)setDutyForm(null);}}/>
+      )}
 
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 24px 0",flexWrap:"wrap",gap:10}}>
@@ -2677,11 +3000,20 @@ function DutyTab({ theme }: { theme?: string }) {
             <span style={{fontSize:28,fontWeight:900,color:"#fff",letterSpacing:2}}>PILOTS ON DUTY</span>
           </div>
         </div>
-        <button onClick={()=>{setLoading(true);setAttempt(a=>a+1);}}
-          style={{background:"var(--accent-color)",border:"none",color:"#fff",borderRadius:9,
-            padding:"10px 20px",fontSize:15,fontWeight:800,cursor:"pointer"}}>
-          ↻ รีโหลด
-        </button>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {canEditDuty&&(
+            <button onClick={()=>openDutyForm(view==="monthly"?selDate:todayStr)}
+              style={{background:"linear-gradient(160deg,var(--accent-color),var(--accent-secondary))",border:"none",color:"#fff",borderRadius:9,
+                padding:"10px 20px",fontSize:15,fontWeight:800,cursor:"pointer",boxShadow:"0 4px 14px var(--glow-accent)"}}>
+              ✏️ จัดเวร
+            </button>
+          )}
+          <button onClick={()=>{setLoading(true);setAttempt(a=>a+1);}}
+            style={{background:"var(--bg-card)",border:"1px solid var(--border-panel)",color:"var(--text-primary)",borderRadius:9,
+              padding:"10px 20px",fontSize:15,fontWeight:800,cursor:"pointer"}}>
+            ↻ รีโหลด
+          </button>
+        </div>
       </div>
 
       {/* Status */}
@@ -2766,12 +3098,143 @@ function DutyTab({ theme }: { theme?: string }) {
       )}
 
       {/* ─── MONTHLY ─── */}
-      {view==="monthly"&&(
-        <div style={{padding:"15px 30px"}}>
-          <div style={{display:"flex",alignItems:"center",gap:15,marginBottom:12}}>
-            <span style={{fontSize:18,fontWeight:800,color:"var(--accent-color)"}}>📅 ตารางเวรประจำเดือน ({MONTH_UPPER[today.getMonth()]} {today.getFullYear()})</span>
-            <span style={{fontSize:14,color:"var(--text-secondary)"}}>· {rows.filter(r=>r.dateStr.includes(`${MONTH_UPPER[today.getMonth()]} ${today.getFullYear()}`)).length} วัน</span>
+      {view==="monthly"&&(()=>{
+        const calYear   = calDate.getFullYear();
+        const calMonth  = calDate.getMonth();
+        const monthKey  = `${MONTH_UPPER[calMonth]} ${calYear}`;
+        const monthRows = rows.filter(r=>r.dateStr.includes(monthKey));
+        const daysInM   = new Date(calYear, calMonth+1, 0).getDate();
+        const firstDow  = new Date(calYear, calMonth, 1).getDay(); // 0=อาทิตย์
+        const isThisMonth = calYear===today.getFullYear() && calMonth===today.getMonth();
+        const selRow    = rows.find(r=>r.dateStr===selDate);
+        const shiftMonth = (n:number)=>setCalDate(new Date(calYear, calMonth+n, 1));
+        const navBtn: React.CSSProperties = {width:34,height:34,borderRadius:"50%",border:"1px solid var(--border-panel)",
+          background:"var(--bg-card)",color:"var(--text-primary)",cursor:"pointer",display:"flex",
+          alignItems:"center",justifyContent:"center",fontSize:13,padding:0,flexShrink:0};
+        return (
+        <div style={{padding:"15px clamp(14px, 2.5vw, 30px)"}}>
+          {/* แถบนำทางเดือน + สลับโหมดปฏิทิน/ตาราง */}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:14}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <button onClick={()=>shiftMonth(-1)} style={navBtn}>◀</button>
+              <div style={{fontSize:18,fontWeight:800,color:"var(--text-primary)",minWidth:120,textAlign:"center",letterSpacing:"0.04em"}}>📅 {monthKey}</div>
+              <button onClick={()=>shiftMonth(1)} style={navBtn}>▶</button>
+              {!isThisMonth&&<button onClick={()=>{setCalDate(new Date(today.getFullYear(),today.getMonth(),1));setSelDate(todayStr);}}
+                style={{...navBtn,width:"auto",padding:"0 14px",fontSize:13,fontWeight:700,color:"var(--accent-color)"}}>วันนี้</button>}
+              <span style={{fontSize:13,color:"var(--text-secondary)"}}>· มีข้อมูล {monthRows.length} วัน</span>
+            </div>
+            <div style={{display:"flex",background:"var(--border-panel)",borderRadius:10,padding:3,gap:2}}>
+              {([["cal","🗓️ ปฏิทิน"],["table","☰ ตาราง"]] as const).map(([m,l])=>(
+                <button key={m} onClick={()=>setMonthlyMode(m)} style={{padding:"6px 14px",borderRadius:8,border:"none",cursor:"pointer",fontWeight:700,fontSize:13,
+                  background:monthlyMode===m?"var(--bg-card)":"transparent",
+                  color:monthlyMode===m?"var(--text-primary)":"var(--text-secondary)",
+                  boxShadow:monthlyMode===m?"var(--card-shadow)":"none"}}>{l}</button>
+              ))}
+            </div>
           </div>
+
+          {/* ─── โหมดปฏิทิน ─── */}
+          {monthlyMode==="cal"&&(
+          <>
+          <div className="glass-panel" style={{padding:"clamp(10px, 1.6vw, 18px)",borderRadius:"var(--radius-xl)",marginBottom:16}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6,marginBottom:6}}>
+              {["อา","จ","อ","พ","พฤ","ศ","ส"].map((d,i)=>(
+                <div key={d} style={{textAlign:"center",fontSize:12,fontWeight:800,letterSpacing:"0.06em",padding:"4px 0",
+                  color:i===0?"var(--day-color-sun)":i===6?"var(--day-color-sat)":"var(--text-secondary)"}}>{d}</div>
+              ))}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6}}>
+              {Array.from({length:firstDow}).map((_,i)=><div key={"b"+i}/>)}
+              {Array.from({length:daysInM}).map((_,i)=>{
+                const d   = i+1;
+                const ds  = `${d} ${monthKey}`;
+                const r   = rows.find(x=>x.dateStr===ds);
+                const dow = new Date(calYear, calMonth, d).getDay();
+                const isToday = ds===todayStr;
+                const isSel   = ds===selDate;
+                return (
+                  <div key={d} onClick={()=>setSelDate(ds)}
+                    style={{
+                      minHeight:"clamp(54px, 9vw, 92px)",borderRadius:12,padding:"6px 7px",cursor:"pointer",
+                      background:isSel?"var(--glow-accent)":dow===0?"var(--row-bg-sun)":dow===6?"var(--row-bg-sat)":"var(--bg-card)",
+                      border:isToday?"2px solid var(--accent-color)":isSel?"1px solid var(--border-active)":"1px solid var(--border-panel)",
+                      opacity:r?1:0.45,
+                      display:"flex",flexDirection:"column",gap:3,
+                      transition:"all 0.2s cubic-bezier(0.32, 0.72, 0, 1)"
+                    }}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:2}}>
+                      <span style={{fontSize:13,fontWeight:800,
+                        color:dow===0?"var(--day-color-sun)":dow===6?"var(--day-color-sat)":"var(--text-primary)"}}>{d}</span>
+                      {isToday&&<span style={{fontSize:8.5,background:"var(--accent-color)",color:"#fff",borderRadius:4,padding:"1px 4px",fontWeight:800,whiteSpace:"nowrap"}}>วันนี้</span>}
+                    </div>
+                    {r&&(
+                      <>
+                        <div className="duty-cal-names">
+                          {r.alert&&<div style={{fontSize:10.5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:"var(--text-primary)"}}><span style={{color:"#ef4444"}}>●</span> {r.alert}</div>}
+                          {r.sof&&r.sof!=="-"&&<div style={{fontSize:10.5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:"var(--text-primary)"}}><span style={{color:"#f97316"}}>●</span> {r.sof}</div>}
+                          {r.remark&&<div style={{fontSize:10,lineHeight:1}}>📌</div>}
+                        </div>
+                        <div className="duty-cal-dots">
+                          {r.alert&&<span style={{width:6,height:6,borderRadius:"50%",background:"#ef4444",display:"inline-block"}}/>}
+                          {r.sof&&r.sof!=="-"&&<span style={{width:6,height:6,borderRadius:"50%",background:"#f97316",display:"inline-block"}}/>}
+                          {r.remark&&<span style={{width:6,height:6,borderRadius:"50%",background:"#eab308",display:"inline-block"}}/>}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{display:"flex",gap:14,flexWrap:"wrap",marginTop:12,paddingTop:10,borderTop:"1px solid var(--border-panel)",fontSize:11.5,color:"var(--text-secondary)"}}>
+              <span><span style={{color:"#ef4444"}}>●</span> ALERT</span>
+              <span><span style={{color:"#f97316"}}>●</span> SOF</span>
+              <span>📌 มี REMARK</span>
+              <span style={{opacity:0.7}}>· แตะวันเพื่อดูรายละเอียด</span>
+            </div>
+          </div>
+
+          {/* รายละเอียดวันที่เลือก */}
+          {selRow?(
+            <div className="glass-panel animate-fade-in-up" key={selDate} style={{padding:"clamp(14px, 2vw, 22px)",borderRadius:"var(--radius-xl)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+                <DayBadge d={selRow.dayFull}/>
+                <span style={{fontSize:17,fontWeight:800,color:"var(--text-primary)"}}>{selDate}</span>
+                {selDate===todayStr&&<span style={{fontSize:10,background:"var(--accent-color)",color:"#fff",borderRadius:5,padding:"2px 8px",fontWeight:800}}>TODAY</span>}
+                {canEditDuty&&(
+                  <button onClick={()=>openDutyForm(selDate)}
+                    style={{marginLeft:"auto",background:"var(--bg-accent)",border:"1px solid var(--border-panel)",color:"var(--accent-color)",
+                      borderRadius:9,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                    ✏️ แก้เวร
+                  </button>
+                )}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:10,marginBottom:10}}>
+                <InfoCard label="ALERT"      value={selRow.alert}     accent="#ef4444"/>
+                <InfoCard label="SOF"        value={selRow.sof}       accent="#f97316"/>
+                <InfoCard label="BASE OPS."  value={selRow.baseops}   accent="#06b6d4"/>
+                <InfoCard label="EMER BRIEF" value={selRow.emerBrief} accent="#a855f7"/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
+                <InfoCard label="9923 DETACHMENT" value={selRow.det9923} accent="#eab308"/>
+                <InfoCard label="C SQUADRON"      value={selRow.cSqdn}   accent="#22c55e"/>
+              </div>
+              {selRow.remark&&(
+                <div style={{marginTop:10,background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",
+                  borderRadius:10,padding:"10px 16px",fontSize:14,color:"#fca5a5"}}>
+                  📌 REMARK: {selRow.remark}
+                </div>
+              )}
+            </div>
+          ):(
+            <div style={{textAlign:"center",color:"var(--text-secondary)",fontSize:14,padding:"14px 0"}}>
+              {loading?"กำลังโหลด...":`ไม่พบข้อมูลเวรของ ${selDate} — แตะวันอื่นในปฏิทิน`}
+            </div>
+          )}
+          </>
+          )}
+
+          {/* ─── โหมดตาราง ─── */}
+          {monthlyMode==="table"&&(
           <div className="table-container">
             <div style={{overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:14,minWidth:900}}>
@@ -2784,12 +3247,12 @@ function DutyTab({ theme }: { theme?: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.filter(r=>r.dateStr.includes(`${MONTH_UPPER[today.getMonth()]} ${today.getFullYear()}`)).length===0&&!loading&&(
+                  {monthRows.length===0&&!loading&&(
                     <tr><td colSpan={9} style={{padding:"40px",textAlign:"center",color:"var(--text-secondary)"}}>
-                      {loadErr?"โหลดไม่สำเร็จ":`ไม่มีข้อมูลสำหรับเดือน ${MONTH_UPPER[today.getMonth()]} ${today.getFullYear()}`}
+                      {loadErr?"โหลดไม่สำเร็จ":`ไม่มีข้อมูลสำหรับเดือน ${monthKey}`}
                     </td></tr>
                   )}
-                  {rows.filter(r=>r.dateStr.includes(`${MONTH_UPPER[today.getMonth()]} ${today.getFullYear()}`)).map((r,i)=>{
+                  {monthRows.map((r,i)=>{
                     const isToday = r.dateStr===todayStr;
                     return (
                       <tr key={i} style={{borderBottom:"1px solid var(--border-panel)",
@@ -2821,8 +3284,10 @@ function DutyTab({ theme }: { theme?: string }) {
               </table>
             </div>
           </div>
+          )}
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -4075,10 +4540,101 @@ function OrderTab() {
   );
 }
 
+function LoginScreen({ onLogin }: { onLogin: (s: Session) => void }) {
+  const [username, setUsername] = useState("");
+  const [pin, setPin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const inp: React.CSSProperties = {
+    width: "100%", boxSizing: "border-box", background: "var(--bg-card)",
+    border: "1px solid var(--border-panel)", color: "var(--text-primary)",
+    borderRadius: 12, padding: "12px 14px", fontSize: 16, outline: "none",
+  };
+
+  const submit = async (e?: any) => {
+    if (e) e.preventDefault();
+    if (!username.trim() || !pin || busy) return;
+    setBusy(true); setErr("");
+    try {
+      const r = await gasLogin(username.trim(), pin);
+      if (r && r.ok && r.token) {
+        onLogin({
+          token: r.token, user: r.user || username.trim(),
+          display: r.display || r.user || username.trim(),
+          role: r.role || "viewer",
+          exp: r.exp || Date.now() + 24 * 3600 * 1000,
+        });
+      } else {
+        const msgs: Record<string, string> = {
+          invalid: "ชื่อผู้ใช้หรือ PIN ไม่ถูกต้อง",
+          locked: "ใส่ PIN ผิดเกิน 5 ครั้ง — ระบบล็อกชั่วคราว 10 นาที",
+          disabled: "บัญชีนี้ถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ",
+          "no-users-sheet": "ระบบยังไม่ได้ตั้งค่าชีท USERS (ดู gas/SETUP.md)",
+        };
+        setErr(msgs[r?.error || ""] || "เข้าสู่ระบบไม่สำเร็จ กรุณาลองอีกครั้ง");
+      }
+    } catch {
+      setErr("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,position:"relative"}}>
+      <div className="ambient-background" />
+      <form onSubmit={submit} className="glass-panel animate-scale-in"
+        style={{width:"100%",maxWidth:380,padding:"36px 30px",borderRadius:"var(--radius-xl)",
+          display:"flex",flexDirection:"column",gap:14,position:"relative",zIndex:1}}>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10,marginBottom:8}}>
+          <div style={{width:64,height:64,background:"linear-gradient(160deg,var(--accent-color),var(--accent-secondary))",
+            borderRadius:20,display:"flex",alignItems:"center",justifyContent:"center",fontSize:30,color:"#fff",
+            boxShadow:"0 10px 28px var(--glow-accent), inset 0 1px 0 rgba(255,255,255,0.35)"}}>✈</div>
+          <div style={{fontWeight:800,fontSize:22,letterSpacing:"-0.02em"}}>201 SOMS</div>
+          <div style={{fontSize:11.5,color:"var(--text-secondary)",letterSpacing:"0.12em",fontWeight:600}}>SQUADRON OPS SYSTEM</div>
+        </div>
+        <div>
+          <div style={{fontSize:12,color:"var(--text-secondary)",fontWeight:700,marginBottom:6}}>ชื่อผู้ใช้</div>
+          <input value={username} onChange={e=>setUsername(e.target.value)} autoFocus
+            autoCapitalize="none" autoComplete="username" style={inp}/>
+        </div>
+        <div>
+          <div style={{fontSize:12,color:"var(--text-secondary)",fontWeight:700,marginBottom:6}}>PIN</div>
+          <input type="password" inputMode="numeric" value={pin} onChange={e=>setPin(e.target.value)}
+            autoComplete="current-password" style={inp}/>
+        </div>
+        {err&&<div style={{background:"rgba(255,69,58,0.1)",border:"1px solid rgba(255,69,58,0.3)",
+          color:"#ff6961",borderRadius:10,padding:"9px 13px",fontSize:13,fontWeight:600}}>{err}</div>}
+        <button type="submit" disabled={busy}
+          style={{marginTop:4,background:"linear-gradient(160deg,var(--accent-color),var(--accent-secondary))",
+            border:"none",color:"#fff",borderRadius:12,padding:"13px",fontSize:15,fontWeight:800,cursor:"pointer",
+            opacity:busy?0.6:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          {busy&&<span className="spinner" style={{width:14,height:14,borderColor:"rgba(255,255,255,0.35)",borderTopColor:"#fff"}}></span>}
+          {busy?"กำลังเข้าสู่ระบบ...":"เข้าสู่ระบบ"}
+        </button>
+        <div style={{textAlign:"center",fontSize:11.5,color:"var(--text-secondary)",marginTop:2}}>
+          ยังไม่มีบัญชี? ติดต่อผู้ดูแลระบบของฝูงบิน
+        </div>
+      </form>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab,setTab]         = useState("dashboard");
   const [sideOpen,setSideOpen] = useState(false);
   const [safetyPrefill, setSafetyPrefill] = useState<any>(null);
+
+  // Auth gate — ทำงานเมื่อ GAS เปิด REQUIRE_AUTH เท่านั้น (ดู gas/SETUP.md)
+  const [authEnabled, setAuthEnabled] = useState(() => localStorage.getItem(AUTH_FLAG_KEY) === "1");
+  const [session, setSession] = useState<Session | null>(() => getSession());
+  useEffect(() => { fetchAuthStatus().then(setAuthEnabled); }, []);
+  useEffect(() => {
+    const h = () => setSession(null); // token หมดอายุ/ถูกเพิกถอน → กลับหน้า login
+    window.addEventListener("soms-unauthorized", h);
+    return () => window.removeEventListener("soms-unauthorized", h);
+  }, []);
+  const doLogout = () => { gasLogout(); setSession(null); };
 
   // Theme support
   const [theme, setTheme] = useState(() => {
@@ -4117,7 +4673,7 @@ export default function App() {
         if(list.length>0){setPopupAnn(list);setShowPopup(true);}
       }
     }).catch(()=>{});
-  },[]);
+  },[session?.token]); // โหลดประกาศใหม่หลังล็อกอิน (ตอนยังไม่ล็อกอินจะอ่านไม่ได้)
 
   const toggleFS = () => {
     if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
@@ -4156,8 +4712,13 @@ export default function App() {
     {id:"more",      l:"☰ เมนูอื่น", icon:"☰"}
   ];
 
+  // ยังไม่ล็อกอิน (และระบบเปิดบังคับ auth) → แสดงหน้า login
+  if (authEnabled && !session) {
+    return <LoginScreen onLogin={(s)=>{ setSessionLS(s); setSession(s); }}/>;
+  }
+
   return (
-    <div style={{background:"var(--bg-app)",minHeight:"100vh",width:"100%",color:"var(--text-primary)",overflowX:"hidden",paddingBottom:isMobile?"85px":"20px"}}>
+    <div style={{background:"var(--bg-app)",minHeight:"100vh",width:"100%",color:"var(--text-primary)",paddingBottom:isMobile?"110px":"24px"}}>
       <div className="ambient-background" />
 
       {showPopup&&popupAnn.length>0&&(
@@ -4170,68 +4731,83 @@ export default function App() {
           style={{position:"fixed",inset:0,zIndex:1000,background:"rgba(0,0,0,0.4)",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)"}}/>
       )}
 
-      {/* Sidebar */}
-      <div className="glass-panel" style={{position:"fixed",top:0,left:sideOpen?0:-325,width:325,height:"100vh",zIndex:1001,
-        transition:"left 0.3s cubic-bezier(0.4, 0, 0.2, 1)",display:"flex",flexDirection:"column",
-        paddingTop:"env(safe-area-inset-top)",borderRadius:"0 20px 20px 0"}}>
+      {/* Sidebar — floating Liquid Glass sheet */}
+      <div className="glass-panel" style={{position:"fixed",top:10,left:sideOpen?10:-340,width:302,height:"calc(100vh - 20px)",zIndex:1001,
+        transition:"left 0.45s cubic-bezier(0.32, 0.72, 0, 1)",display:"flex",flexDirection:"column",
+        paddingTop:"env(safe-area-inset-top)",borderRadius:"var(--radius-xl)",overflow:"hidden"}}>
         <div className="app-sidebar-header" style={{
-          padding:"22px 25px",
-          borderBottom:"1px solid var(--border-panel)",display:"flex",alignItems:"center",gap:15}}>
-          <div style={{width:45,height:45,background:"linear-gradient(135deg,var(--accent-color),var(--accent-secondary))",borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,color:"#fff",flexShrink:0,boxShadow:"0 4px 12px var(--glow-accent)"}}>✈</div>
+          padding:"20px 20px 16px",
+          borderBottom:"1px solid var(--border-panel)",display:"flex",alignItems:"center",gap:13}}>
+          <div style={{width:44,height:44,background:"linear-gradient(160deg,var(--accent-color),var(--accent-secondary))",borderRadius:14,display:"flex",alignItems:"center",justifyContent:"center",fontSize:21,color:"#fff",flexShrink:0,boxShadow:"0 6px 16px var(--glow-accent), inset 0 1px 0 rgba(255,255,255,0.35)"}}>✈</div>
           <div style={{flex:1}}>
-            <div style={{fontWeight:900,fontSize:18,letterSpacing:1}}>201 SOMS</div>
-            <div style={{fontSize:11,color:"var(--accent-color)",letterSpacing:1,fontWeight:700}}>SQUADRON OPS SYSTEM</div>
+            <div style={{fontWeight:800,fontSize:17,letterSpacing:"-0.02em"}}>201 SOMS</div>
+            <div style={{fontSize:10.5,color:"var(--text-secondary)",letterSpacing:"0.1em",fontWeight:600}}>SQUADRON OPS SYSTEM</div>
           </div>
           <button onClick={()=>setSideOpen(false)}
-            style={{background:"transparent",border:"none",color:"var(--text-secondary)",fontSize:22,cursor:"pointer",padding:4,
-              minWidth:40,minHeight:40,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+            style={{background:"var(--bg-card)",border:"1px solid var(--border-panel)",color:"var(--text-secondary)",fontSize:14,cursor:"pointer",padding:0,
+              width:34,height:34,minWidth:34,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
         </div>
-        <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
+        <div style={{flex:1,overflowY:"auto",padding:"14px 14px"}}>
           {TABS.map(t=>(
             <button key={t.id} onClick={()=>{setTab(t.id);setSideOpen(false);}}
               className="sidebar-tab-btn"
               style={{
-                width:"100%",padding:isMobile?"18px 24px":"14px 20px",textAlign:"left",
+                width:"100%",padding:isMobile?"15px 18px":"12px 16px",textAlign:"left",
                 background:tab===t.id?"var(--glow-accent)":"transparent",
-                border:"none",cursor:"pointer",fontSize:isMobile?18:15,
+                border:"none",cursor:"pointer",fontSize:isMobile?16:14.5,
                 fontWeight:tab===t.id?700:500,
                 color:tab===t.id?"var(--accent-color)":"var(--text-secondary)",
-                borderLeft:tab===t.id?"4px solid var(--accent-color)":"4px solid transparent"
+                borderRadius:"var(--radius-md)",
+                boxShadow:tab===t.id?"inset 0 1px 0 rgba(255,255,255,0.08)":"none"
               }}>
               {t.l}
             </button>
           ))}
         </div>
-        <div style={{padding:"15px 25px",borderTop:"1px solid var(--border-panel)",fontSize:12,color:"var(--text-secondary)",textAlign:"center",fontWeight:500}}>
-          201 SQDN · SQUADRON MANAGEMENT
+        <div style={{padding:"13px 20px calc(env(safe-area-inset-bottom, 0px) + 13px)",borderTop:"1px solid var(--border-panel)",fontSize:11,color:"var(--text-secondary)",textAlign:"center",fontWeight:500,letterSpacing:"0.08em"}}>
+          {authEnabled&&session?(
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,letterSpacing:"normal"}}>
+              <div style={{textAlign:"left",minWidth:0}}>
+                <div style={{fontWeight:700,color:"var(--text-primary)",fontSize:12.5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>👤 {session.display}</div>
+                <div style={{fontSize:10.5}}>{session.role==="admin"?"ผู้ดูแลระบบ":session.role==="editor"?"สิทธิ์แก้ไขข้อมูล":"สิทธิ์ดูอย่างเดียว"}</div>
+              </div>
+              <button onClick={doLogout}
+                style={{background:"rgba(255,69,58,0.12)",border:"1px solid rgba(255,69,58,0.3)",color:"#ff6961",
+                  borderRadius:8,padding:"6px 12px",fontSize:11.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+                ออกจากระบบ
+              </button>
+            </div>
+          ):(
+            <>201 SQDN · SQUADRON MANAGEMENT</>
+          )}
         </div>
       </div>
 
-      {/* Header */}
-      <div className="glass-panel app-header" style={{borderBottom:"1px solid var(--border-panel)",
-        display:"flex",alignItems:"center",justifyContent:"space-between",
-        position:"sticky",top:0,zIndex:100}}>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
+      {/* Header — floating glass capsule */}
+      <div className="glass-panel app-header" style={{
+        display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,
+        position:"sticky",zIndex:100}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,minWidth:0}}>
           <button onClick={()=>setSideOpen(true)}
-            style={{background:"var(--glow-accent)",border:"1px solid var(--border-panel)",color:"var(--text-secondary)",
-              borderRadius:10,padding:"10px 15px",cursor:"pointer",fontSize:isMobile?24:18,lineHeight:1,flexShrink:0,
-              minWidth:isMobile?50:45,minHeight:isMobile?50:45,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            style={{background:"var(--bg-card)",border:"1px solid var(--border-panel)",color:"var(--text-primary)",
+              borderRadius:"50%",padding:0,cursor:"pointer",fontSize:isMobile?20:17,lineHeight:1,flexShrink:0,
+              width:isMobile?46:42,height:isMobile?46:42,minWidth:isMobile?46:42,display:"flex",alignItems:"center",justifyContent:"center"}}>
             ☰
           </button>
 
-          <div>
-            <div style={{fontWeight:900,fontSize:18,letterSpacing:1}}>201 SOMS</div>
-            <div style={{fontSize:12,color:"var(--accent-color)",letterSpacing:1,fontWeight:700}}>{TABS.find(t=>t.id===tab)?.l||""}</div>
+          <div style={{minWidth:0}}>
+            <div style={{fontWeight:800,fontSize:17,letterSpacing:"-0.02em",whiteSpace:"nowrap"}}>201 SOMS</div>
+            <div style={{fontSize:12,color:"var(--accent-color)",letterSpacing:"0.02em",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TABS.find(t=>t.id===tab)?.l||""}</div>
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           {/* ปุ่มสลับธีมแบบเลื่อนซ้ายขวา ☀️/🌙 */}
           <div onClick={toggleTheme} title="สลับโหมดสว่าง/มืด"
             style={{
-              width: 72,
-              height: 38,
-              borderRadius: 19,
-              background: theme === "light" ? "rgba(15, 23, 42, 0.08)" : "rgba(255, 255, 255, 0.08)",
+              width: 64,
+              height: 34,
+              borderRadius: 17,
+              background: theme === "light" ? "rgba(120,120,128,0.16)" : "rgba(120,120,128,0.32)",
               border: "1px solid var(--border-panel)",
               position: "relative",
               cursor: "pointer",
@@ -4239,51 +4815,48 @@ export default function App() {
               alignItems: "center",
               padding: "0 4px",
               boxSizing: "border-box" as const,
-              boxShadow: "inset 0 2px 4px rgba(0,0,0,0.1)",
+              boxShadow: "inset 0 1px 3px rgba(0,0,0,0.12)",
               transition: "background-color 0.3s ease",
               flexShrink: 0
             }}>
             {/* ตัวอักษรบอกโหมดจางๆ ด้านหลัง */}
-            <span style={{ fontSize: 13, opacity: theme === "light" ? 0.3 : 0.8, marginLeft: 6, userSelect: "none" }}>🌙</span>
-            <span style={{ fontSize: 13, opacity: theme === "light" ? 0.8 : 0.3, marginLeft: "auto", marginRight: 6, userSelect: "none" }}>☀️</span>
-            
+            <span style={{ fontSize: 12, opacity: theme === "light" ? 0.35 : 0.9, marginLeft: 5, userSelect: "none" }}>🌙</span>
+            <span style={{ fontSize: 12, opacity: theme === "light" ? 0.9 : 0.35, marginLeft: "auto", marginRight: 5, userSelect: "none" }}>☀️</span>
+
             {/* ตัวปุ่มเลื่อนทรงกลมพร้อมไอคอน */}
             <div style={{
-              width: 28,
-              height: 28,
+              width: 26,
+              height: 26,
               borderRadius: "50%",
-              background: theme === "light" 
-                ? "linear-gradient(135deg, #f59e0b, #d97706)" 
-                : "linear-gradient(135deg, #38bdf8, #0ea5e9)",
+              background: theme === "light" ? "#ffffff" : "#48484a",
               position: "absolute",
-              top: 4,
-              left: theme === "light" ? 38 : 4,
+              top: 3,
+              left: theme === "light" ? 34 : 3,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 14,
-              boxShadow: theme === "light" ? "0 2px 8px rgba(245, 158, 11, 0.4)" : "0 2px 8px rgba(56, 189, 248, 0.4)",
-              transition: "left 0.3s cubic-bezier(0.25, 1, 0.5, 1), background 0.3s ease, box-shadow 0.3s ease"
+              fontSize: 13,
+              boxShadow: "0 3px 8px rgba(0,0,0,0.25), 0 1px 1px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.25)",
+              transition: "left 0.35s cubic-bezier(0.32, 0.72, 0, 1), background 0.3s ease"
             }}>
               {theme === "light" ? "☀️" : "🌙"}
             </div>
           </div>
           {!isMobile&&<button onClick={toggleFS} title={isFS?"ออกจากเต็มจอ":"เต็มจอ"}
-            style={{background:"var(--glow-accent)",border:"1px solid var(--border-panel)",color:"var(--accent-color)",
-              borderRadius:10,padding:"8px 10px",fontSize:18,cursor:"pointer",
-              minWidth:45,minHeight:45,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            style={{background:"var(--bg-card)",border:"1px solid var(--border-panel)",color:"var(--text-primary)",
+              borderRadius:"50%",padding:0,fontSize:16,cursor:"pointer",
+              width:42,height:42,minWidth:42,display:"flex",alignItems:"center",justifyContent:"center"}}>
             {isFS?"⊠":"⛶"}
           </button>}
           <Clock/>
         </div>
       </div>
 
-      {/* Bottom Navigation Bar สำหรับมือถือ */}
+      {/* Bottom Navigation — floating Liquid Glass dock สำหรับมือถือ */}
       {isMobile&&(
-        <div className="glass-panel" style={{position:"fixed",bottom:0,left:0,right:0,height:85,zIndex:999,
-          borderTop:"1px solid var(--border-panel)",display:"grid",gridTemplateColumns:"repeat(5, 1fr)",
-          paddingBottom:"env(safe-area-inset-bottom)",borderRadius:"24px 24px 0 0",
-          boxShadow:"0 -10px 40px rgba(0,0,0,0.15)"}}>
+        <div className="glass-panel app-dock" style={{height:74,
+          display:"grid",gridTemplateColumns:`repeat(${MOBILE_TABS.length}, 1fr)`,
+          alignItems:"center",overflow:"hidden"}}>
           {MOBILE_TABS.map(t=>(
             <button key={t.id} onClick={()=>{
               if(t.id === "more") {
@@ -4292,18 +4865,21 @@ export default function App() {
                 setTab(t.id);
               }
             }}
-              style={{background:"transparent",border:"none",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+              style={{background:"transparent",border:"none",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,
                 color:tab===t.id && t.id!=="more"?"var(--accent-color)":"var(--text-secondary)",cursor:"pointer",
-                paddingTop: 8}}>
-              <span style={{fontSize:24,marginBottom:6, transition:"transform 0.2s", transform:tab===t.id && t.id!=="more"?"scale(1.15) translateY(-2px)":"scale(1)"}}>{t.icon}</span>
-              <span style={{fontSize:11,fontWeight:tab===t.id && t.id!=="more"?700:500}}>{t.id === "more" ? "เมนูอื่น" : t.l.split(" ")[1]}</span>
+                height:"100%",padding:0}}>
+              <span style={{fontSize:21,lineHeight:1,transition:"all 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
+                transform:tab===t.id && t.id!=="more"?"scale(1.12) translateY(-1px)":"scale(1)",
+                background:tab===t.id && t.id!=="more"?"var(--glow-accent)":"transparent",
+                borderRadius:999,padding:"4px 11px"}}>{t.icon}</span>
+              <span style={{fontSize:10,fontWeight:tab===t.id && t.id!=="more"?700:500,whiteSpace:"nowrap"}}>{t.id === "more" ? "เมนูอื่น" : t.l.split(" ")[1]}</span>
             </button>
           ))}
         </div>
       )}
 
       {/* Content — full width, responsive padding */}
-      <div style={{padding:"24px clamp(16px, 2vw, 40px)",width:"100%",boxSizing:"border-box" as any,maxWidth:2400,margin:"0 auto"}}>
+      <div className="animate-fade-in-up" key={tab} style={{padding:"22px clamp(14px, 3vw, 40px) 0",width:"100%",boxSizing:"border-box" as any,maxWidth:1600,margin:"0 auto",position:"relative",zIndex:1}}>
         {tab==="dashboard"&&<DashboardContent/>}
         {tab==="notam"    &&<NotamTab/>}
         {tab==="flight"   &&<FlightTab onOpenSafety={openSafety}/>}
@@ -4316,7 +4892,7 @@ export default function App() {
         {tab==="safety"   &&<SafetyTab prefill={safetyPrefill} onClearPrefill={()=>setSafetyPrefill(null)}/>}
         {tab==="order"    &&<OrderTab/>}
         {tab==="weather"  &&<WeatherTab/>}
-        <div style={{textAlign:"center",color:"#1e3a5f",fontSize:12,marginTop:20,letterSpacing:1}}>
+        <div style={{textAlign:"center",color:"var(--text-secondary)",opacity:0.55,fontSize:11,margin:"28px 0 8px",letterSpacing:"0.08em"}}>
           201 SQUADRON MANAGEMENT SYSTEM · PROTOTYPE
         </div>
       </div>
@@ -4500,10 +5076,10 @@ function DashboardContent() {
         {/* 2. เวรประจำวัน */}
         <Sec title="เวรประจำวัน" icon="👮">
           {dutyRow ? (
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,padding:"6px 0"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))",gap:10,padding:"6px 0"}}>
               {[["ALERT 1",dutyRow.alert,"#ef4444"],["SOF",dutyRow.sof,"#f97316"],["BASE OPS.",dutyRow.baseops,"#06b6d4"],["EMER BRIEF",dutyRow.emerBrief,"#a855f7"]].map(([l,v,c])=>(
-                <div key={l} style={{background:"var(--bg-card)",border:"1px solid var(--border-panel)",borderLeft:`4px solid ${c}`,borderRadius:8,padding:"12px 15px"}}>
-                  <div style={{fontSize:11,color:c,fontWeight:800,marginBottom:5}}>{l}</div>
+                <div key={l} style={{background:"var(--bg-card)",border:"1px solid var(--border-panel)",borderLeft:`4px solid ${c}`,borderRadius:12,padding:"12px 15px",boxShadow:"inset 0 1px 0 rgba(255,255,255,0.06)"}}>
+                  <div style={{fontSize:11,color:c,fontWeight:800,marginBottom:5,letterSpacing:"0.05em"}}>{l}</div>
                   <div style={{fontSize:18,fontWeight:800,color:"var(--text-primary)"}}>{v||"—"}</div>
                 </div>
               ))}
@@ -4521,9 +5097,9 @@ function DashboardContent() {
             const timeStr = e.start?.dateTime ? dt?.toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit"}) : "ตลอดวัน";
             return (
               <div key={i} style={{padding:"10px 0",borderBottom:"1px solid var(--border-panel)",display:"flex",gap:15,alignItems:"center"}}>
-                <div style={{background:"var(--bg-accent)",padding:"5px 10px",borderRadius:8,textAlign:"center",minWidth:55,border:"1px solid var(--border-panel)"}}>
-                  <div style={{fontSize:11,color:"#60a5fa",fontWeight:800}}>{MONTH_EN[dt?.getMonth()||0]}</div>
-                  <div style={{fontSize:18,fontWeight:800,color:"#fff"}}>{dt?.getDate()}</div>
+                <div style={{background:"var(--bg-accent)",padding:"5px 10px",borderRadius:10,textAlign:"center",minWidth:55,border:"1px solid var(--border-panel)"}}>
+                  <div style={{fontSize:11,color:"var(--accent-color)",fontWeight:800}}>{MONTH_EN[dt?.getMonth()||0]}</div>
+                  <div style={{fontSize:18,fontWeight:800,color:"var(--text-primary)"}}>{dt?.getDate()}</div>
                 </div>
                 <div>
                   <div style={{fontSize:15,fontWeight:700,color:"var(--text-primary)"}}>{e.summary}</div>
@@ -4858,7 +5434,9 @@ function WeatherTab() {
 function PostFlightTab() {
   const [logs, setLogs] = useCachedState<any[]>("tab_logs_new", []);
   const [pilots, setPilots] = useCachedState<any[]>("tab_pilots_pf", []);
-  const [ready, setReady] = useState(false);
+  // มี cache จากรอบก่อน → แสดงทันที แล้วรีเฟรชเบื้องหลัง (stale-while-revalidate)
+  const [ready, setReady] = useState(() => logs.length > 0);
+  const [bgRefresh, setBgRefresh] = useState(true);
   const [editFlight, setEditFlight] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [view, setView] = useState("log"); // log or hours
@@ -4893,10 +5471,10 @@ function PostFlightTab() {
           to: fmtTime(r[8]), ld: fmtTime(r[9]), hrs: r[10]||"", discrepancy: r[11]||""
         })));
       }
-      
-      
+
+
       setReady(true);
-    }).catch(console.error);
+    }).catch(console.error).finally(()=>setBgRefresh(false));
   }, []);
 
   if(!ready) return <div style={{textAlign:"center",padding:50,color:"var(--text-secondary)"}}>กำลังโหลดข้อมูล...</div>;
@@ -5137,7 +5715,8 @@ function PostFlightTab() {
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
-      
+      {bgRefresh && <div style={{display:"flex",alignItems:"center",gap:8,alignSelf:"flex-start",background:"var(--bg-accent)",border:"1px solid var(--border-panel)",borderRadius:999,padding:"4px 14px",fontSize:12,color:"var(--text-secondary)"}}><span className="spinner" style={{width:12,height:12,borderWidth:2}}></span> กำลังอัปเดตข้อมูลล่าสุด...</div>}
+
       {syncing && <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{background:"#fff",padding:"10px 20px",borderRadius:8,color:"#000",fontWeight:800}}>กำลังบันทึกข้อมูล...</div></div>}
       
       {editFlight && (
@@ -5266,7 +5845,9 @@ function PostFlightTab() {
 function PilotHrsTab() {
   const [logs, setLogs] = useCachedState<any[]>("tab_logs_new", []);
   const [pilots, setPilots] = useCachedState<any[]>("tab_pilots_pf", []);
-  const [ready, setReady] = useState(false);
+  // มี cache จากรอบก่อน → แสดงทันที แล้วรีเฟรชเบื้องหลัง (stale-while-revalidate)
+  const [ready, setReady] = useState(() => logs.length > 0 && pilots.length > 0);
+  const [bgRefresh, setBgRefresh] = useState(true);
   const [view, setView] = useState("hours-92a");
   const [viewDate, setViewDate] = useState(new Date());
 
@@ -5315,9 +5896,9 @@ function PilotHrsTab() {
         }));
       };
       setPilots([...parsePilotData("S-92A", pA), ...parsePilotData("S-70i", pB)]);
-      
+
       setReady(true);
-    }).catch(console.error);
+    }).catch(console.error).finally(()=>setBgRefresh(false));
   }, []);
 
   if(!ready) return <div style={{textAlign:"center",padding:50,color:"var(--text-secondary)"}}>กำลังโหลดข้อมูล...</div>;
@@ -5544,6 +6125,7 @@ function PilotHrsTab() {
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      {bgRefresh && <div style={{display:"flex",alignItems:"center",gap:8,alignSelf:"flex-start",background:"var(--bg-accent)",border:"1px solid var(--border-panel)",borderRadius:999,padding:"4px 14px",fontSize:12,color:"var(--text-secondary)"}}><span className="spinner" style={{width:12,height:12,borderWidth:2}}></span> กำลังอัปเดตข้อมูลล่าสุด...</div>}
       <div style={{display:"flex",gap:10,background:"var(--bg-panel)",padding:5,borderRadius:10,width:"fit-content"}}>
         <button onClick={()=>setView("hours-92a")} style={{padding:"8px 20px",borderRadius:8,background:view==="hours-92a"?"#8b5cf6":"transparent",color:view==="hours-92a"?"#fff":"var(--text-secondary)",border:"none",cursor:"pointer",fontWeight:700}}>สรุปชั่วโมงบิน S-92A</button>
         <button onClick={()=>setView("hours-70i")} style={{padding:"8px 20px",borderRadius:8,background:view==="hours-70i"?"#8b5cf6":"transparent",color:view==="hours-70i"?"#fff":"var(--text-secondary)",border:"none",cursor:"pointer",fontWeight:700}}>สรุปชั่วโมงบิน S-70i</button>
