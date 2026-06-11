@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, Fragment } from "react";
 import XLSX from "xlsx-js-style";
 
 // ── Google Sheets Sync ────────────────────────────────────────────────────────
-const GAS_URL = "https://script.google.com/macros/s/AKfycbxZEZnOBoCrRutNrHzvzLbJIuQv_8jbWvHXLJ4O-tjSrabjpXualOZgv8sld3EH8HA5/exec";
+const GAS_URL = "https://script.google.com/macros/s/AKfycbwAjBYT6nzwNWO2mQNHcF-u1VISgAFF-jf_nylcm2PDEgYJT1670W6FaP7rT84DHUpL/exec";
 
 // ── Auth / Session ────────────────────────────────────────────────────────────
 // ทำงานเต็มรูปแบบเมื่อฝั่ง GAS ตั้ง REQUIRE_AUTH=true (ดู gas/SETUP.md)
